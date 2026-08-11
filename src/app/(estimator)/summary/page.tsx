@@ -6,7 +6,10 @@ import dynamic from 'next/dynamic';
 import { useEstimate } from '@/lib/estimate/EstimateContext';
 import { formatCurrency } from '@/lib/utils/formatCurrency';
 import { parseNumericInput } from '@/lib/utils/parseNumericInput';
-import { backSolveCategoryMarkupsFromPreTweakPercent } from '@/lib/calc/markupBackSolve';
+import {
+  backSolveCategoryMarkupsFromPreTweakPercent,
+  backSolveMarginTweakFromPostTweakPercent,
+} from '@/lib/calc/markupBackSolve';
 import { EstimatePdfDocument } from '@/components/EstimatePdfDocument';
 import { pdfFileName } from '@/lib/utils/pdfFileName';
 import { Term } from '@/components/Term';
@@ -46,6 +49,9 @@ function Row({
 export default function SummaryPage() {
   const { result, input, setMarkups, coverInfo } = useEstimate();
   const es = result.executiveSummary;
+  const markupPercentPostTweak = es.totalDirectCostBreakEven
+    ? es.projectedGrossMarginTotal / es.totalDirectCostBreakEven - 1
+    : 0;
   const [venueVisible, setVenueVisible] = useState(false);
   const [venueSqft, setVenueSqft] = useState(0);
 
@@ -135,6 +141,30 @@ export default function SummaryPage() {
             value={input.markups.marginTweak}
             onChange={(e) => setMarkups({ marginTweak: parseNumericInput(e.target.value) })}
           />
+        </label>
+        <label className="flex justify-between items-center py-1">
+          <span className="text-sm text-slate">
+            <Term definition="The Mark-Up % after your manual margin tweak is applied — reflects the PGM Grand Total instead of the pre-tweak Total Direct Cost">
+              Mark-Up % Post Tweak
+            </Term>
+          </span>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              step="0.1"
+              className="w-20 border border-line rounded px-2 py-1 text-right"
+              value={(markupPercentPostTweak * 100).toFixed(1)}
+              onChange={(e) => {
+                const tweak = backSolveMarginTweakFromPostTweakPercent(
+                  parseNumericInput(e.target.value) / 100,
+                  es.totalDirectCostBreakEven,
+                  es.totalDirectCost,
+                );
+                if (tweak !== null) setMarkups({ marginTweak: tweak });
+              }}
+            />
+            <span className="text-sm text-slate">%</span>
+          </div>
         </label>
         <Row
           label={
