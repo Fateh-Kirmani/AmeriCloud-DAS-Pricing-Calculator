@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useEstimate } from '@/lib/estimate/EstimateContext';
 import { formatCurrency } from '@/lib/utils/formatCurrency';
 import { parseNumericInput } from '@/lib/utils/parseNumericInput';
+import { backSolveCategoryMarkupsFromPreTweakPercent } from '@/lib/calc/markupBackSolve';
 import { EstimatePdfDocument } from '@/components/EstimatePdfDocument';
 import { pdfFileName } from '@/lib/utils/pdfFileName';
 import { Term } from '@/components/Term';
@@ -106,7 +107,25 @@ export default function SummaryPage() {
         </h2>
         <Row label="Total Direct Cost" value={formatCurrency(es.totalDirectCost)} strong />
         <Row label="Projected Gross Profit $$" value={formatCurrency(es.grossProfit)} />
-        <Row label="Mark-Up %" value={`${(es.markupPercent * 100).toFixed(1)}%`} />
+        <label className="flex justify-between items-center py-1">
+          <span className="text-sm text-slate">Mark-Up %</span>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              step="0.1"
+              className="w-20 border border-line rounded px-2 py-1 text-right"
+              value={(es.markupPercent * 100).toFixed(1)}
+              onChange={(e) => {
+                const rates = backSolveCategoryMarkupsFromPreTweakPercent(
+                  parseNumericInput(e.target.value) / 100,
+                  es.totalDirectCostBreakEven,
+                );
+                if (rates) setMarkups(rates);
+              }}
+            />
+            <span className="text-sm text-slate">%</span>
+          </div>
+        </label>
         <Row label="Gross Margin %" value={`${(es.grossMarginPercent * 100).toFixed(1)}%`} />
         <label className="flex justify-between items-center py-2">
           <span className="text-slate text-sm">Tweak for Margin Target ($)</span>
