@@ -72,8 +72,26 @@ Notable finding from the final whole-branch review, fixed before merge:
 
 Deferred (Minor, non-blocking): `src/lib/auth/adminAuth.ts` top-level-imports `next/headers`, now reached transitively by the Edge `middleware.ts` — confirmed non-breaking on Next 14.2.35 but undoes Task 1's deliberate edge-clean isolation; splitting `requireAdminSession()` into its own module would restore it. Non-constant-time password comparison and a static non-expiring session cookie (no rotation) — an accepted tradeoff for a single shared internal password, revisit if this ever protects more than internal pricing. `deleteMaterial`/`deleteRental`/`deleteSoftCost` and the singleton updates don't catch Prisma P2025 (record-not-found). `ActionResult`/`ValidationErr`/`parseNonNegative`/`parsePercent` helpers are redefined per-file across the 5 admin action files rather than shared. Markup percent fields are hard-capped at 100% — confirm with the stakeholder this is always correct for construction markups.
 
+## Status: Deployment — COMPLETE
+
+The app is live in production on Vercel, backed by Prisma Postgres (pooled `DATABASE_URL` for runtime, direct `DIRECT_URL` for migrations/CLI — see the `datasource db` block in `prisma/schema.prisma`). GitHub repo: `MintCookies04/AmeriCloud-DAS-Pricing-Calculator`, default/production branch `main`.
+
+## Status: Calculation Audit + Editable Mark-Up % — COMPLETE (merged to main)
+
+Spec: `docs/superpowers/specs/2026-08-11-calc-audit-editable-markup-design.md`. Plan: `docs/superpowers/plans/2026-08-11-editable-markup-percentage.md`.
+
+This was sub-project B of a larger three-part request from the user (the other two — a Materials-page Excel export, and multi-project support with a landing page/Admin-password removal — are tracked below under "What to do next", in the user's confirmed order: B then C then A).
+
+- Audited every sheet of `DAS Construction Bidding Workbook.xlsx` against the app's calc engine and seed data. Found the app's existing Coax "Labeling for splitter" derivation (`× 4` of "Install combiner/splitter") and the full Grand-Total-to-Bid chain in `src/lib/calc/executiveSummary.ts` were **already correct** — the user's two reported "bugs" were not bugs. The one real gap: the workbook's "Mark-Up%" (pre-tweak) and "Mark-Up% Post Tweak" rows were both display-only in the original workbook with zero downstream effect, and the post-tweak row was entirely missing from the UI.
+- Added `src/lib/calc/markupBackSolve.ts` — two pure, unit-tested helpers (`backSolveCategoryMarkupsFromPreTweakPercent`, `backSolveMarginTweakFromPostTweakPercent`) that back-solve `MarkupInputs` from a typed-in percentage, each returning `null` as a no-op when `totalDirectCostBreakEven` is `$0`.
+- Made "Mark-Up %" editable on the Executive Summary page (sets `laborMarkupPct = passThroughMarkupPct = materialMarkupPct` to the typed value) and added a new editable "Mark-Up % Post Tweak" row that reads/writes the same `marginTweak` as the existing "Tweak for Margin Target ($)" field — the post-tweak percent itself is a one-line derived value computed inline in `summary/page.tsx`, not a new calc-engine field, per the spec's explicit "no changes to `executiveSummary.ts`" constraint.
+- Verified: 119/119 tests passing (24 files), `tsc --noEmit` clean, `npm run build` succeeds (16 routes), and the paired-field sync ($ tweak ↔ post-tweak %) and both $0-break-even no-op cases were confirmed live in-browser via Playwright.
+
 ## What to do next
 
-All three planned phases (Foundation & Calculation Engine, Estimating Workflow UI, Admin Area) are complete and merged. No plan is currently in progress — check with the user for the next priority.
+Two sub-projects remain from the user's original three-part request, in their confirmed order:
+
+- **C — Materials → Excel export** (next up): a green "Export to Excel" button on the Materials page, exporting only non-zero-quantity rows into a 2-sheet `.xlsx` (Consumable, DAS Materials) with columns TYPE, MANUFACTURER/MODEL, DESCRIPTION, UNIT COST, QTY, EXT COST. Needs a new dependency (e.g. `xlsx` or `exceljs`, not yet installed) and its own brainstorming/design pass.
+- **A — Multi-project support** (largest, not yet designed): a landing page (Create New Project / Explore Current Projects), a new persisted `Project` entity (today there's only one in-memory/localStorage estimate), an "All Projects" page (sidebar-less, with a Name/Client search filter and Edit/Delete), an unsaved-changes confirmation dialog when leaving a project, and removing Admin's password protection while scoping all 9 currently-global reference-data tables per-project (defaulting new projects to the current global values).
 
 Minor items noted for later (non-blocking, carried over from earlier phases): the Materials `percentOfTotal` display field's denominator should be reconciled against the workbook's display column; the crew-size technician-count input should be constrained to 1–20 in the UI; consider `next/font` instead of the current Google Fonts `@import` in `globals.css`; PDF generation (`BlobProvider`) regenerates on every summary-page keystroke instead of gating behind the Export click; `pdfFileName.ts` doesn't sanitize filesystem-unsafe characters; `Number(e.target.value)` produces `NaN` on empty/partial numeric input across several pages.
