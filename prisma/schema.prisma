@@ -122,3 +122,139 @@ model EstimateDefaults {
   contingencyPct        Float
   updatedAt             DateTime @updatedAt
 }
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String   @default("")
+  client    String   @default("")
+  draftJson Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  materialItems           ProjectMaterialItem[]
+  laborTasks              ProjectLaborTask[]
+  laborRates              ProjectLaborRate[]
+  crewSizeTable           ProjectCrewSizeRow[]
+  laborProjectionSettings ProjectLaborProjectionSettings?
+  passThroughRoleRates    ProjectPassThroughRoleRate[]
+  rentalRates             ProjectRentalRate[]
+  softCostRates           ProjectSoftCostRate[]
+  estimateDefaults        ProjectEstimateDefaults?
+}
+
+model ProjectMaterialItem {
+  id           String           @id @default(cuid())
+  projectId    String
+  project      Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key          String
+  type         String
+  manufacturer String?
+  model        String?
+  description  String
+  vendor       String?
+  category     MaterialCategory
+  unitCost     Float
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([projectId, key])
+}
+
+model ProjectLaborTask {
+  id                 String        @id @default(cuid())
+  projectId          String
+  project            Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key                String
+  sheet              LaborSheet
+  category           String
+  name               String
+  minutesPerUnit     Float
+  unit               String
+  laborRole          LaborRoleName
+  includedInSubtotal Boolean       @default(true)
+  derivedFromJson    Json?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([projectId, key])
+}
+
+model ProjectLaborRate {
+  id          String        @id @default(cuid())
+  projectId   String
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role        LaborRoleName
+  hourlyRate  Float
+  rawWageRate Float
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([projectId, role])
+}
+
+model ProjectCrewSizeRow {
+  id              String  @id @default(cuid())
+  projectId       String
+  project         Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  technicianCount Int
+  cmsNeeded       Int
+
+  @@unique([projectId, technicianCount])
+}
+
+model ProjectLaborProjectionSettings {
+  projectId                     String   @id
+  project                       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  hoursPerManDay                Float
+  hoursPerManWeek               Float
+  stagingMaterialMultiplier     Float
+  cmPercentOfTechHours          Float
+  pmPercentOfTechHours          Float
+  coordinatorPercentOfTechHours Float
+  updatedAt                     DateTime @updatedAt
+}
+
+model ProjectPassThroughRoleRate {
+  id        String              @id @default(cuid())
+  projectId String
+  project   Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind      PassThroughRateKind
+  role      LaborRoleName
+  amount    Float
+
+  @@unique([projectId, kind, role])
+}
+
+model ProjectRentalRate {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key       String
+  name      String
+  rate      Float
+  unit      String
+
+  @@unique([projectId, key])
+}
+
+model ProjectSoftCostRate {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key       String
+  name      String
+  fee       Float
+
+  @@unique([projectId, key])
+}
+
+model ProjectEstimateDefaults {
+  projectId            String   @id
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  laborMarkupPct       Float
+  passThroughMarkupPct Float
+  materialMarkupPct    Float
+  corporateMarkupPct   Float
+  taxRate              Float
+  contingencyPct       Float
+  updatedAt            DateTime @updatedAt
+}
