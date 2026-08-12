@@ -8,6 +8,7 @@ import { parseNumericInput } from '@/lib/utils/parseNumericInput';
 import { MoveToButton } from '@/components/MoveToButton';
 import { Term } from '@/components/Term';
 import type { MaterialCategory } from '@/lib/calc';
+import { excelFileName } from '@/lib/utils/pdfFileName';
 
 const CATEGORIES: MaterialCategory[] = ['Consumable', 'DAS Materials', 'BAT Materials'];
 
@@ -16,7 +17,7 @@ function scrollToCategory(category: MaterialCategory) {
 }
 
 export default function MaterialsPage() {
-  const { referenceData, input, result, setMaterialQuantity, setContingencyPct, setShippingHandling } = useEstimate();
+  const { referenceData, input, result, setMaterialQuantity, setContingencyPct, setShippingHandling, coverInfo } = useEstimate();
   const [search, setSearch] = useState('');
   const [onlyWithQty, setOnlyWithQty] = useState(false);
 
@@ -26,6 +27,27 @@ export default function MaterialsPage() {
   const presentCategories = CATEGORIES.filter((category) =>
     referenceData.materialItems.some((m) => m.category === category),
   );
+
+  const hasExportableRows = referenceData.materialItems.some(
+    (item) =>
+      (item.category === 'Consumable' || item.category === 'DAS Materials') &&
+      (qtyByKey.get(item.key) ?? 0) > 0,
+  );
+
+  async function handleExport() {
+    const { buildMaterialsWorkbook } = await import('@/lib/export/materialsWorkbook');
+    const workbook = buildMaterialsWorkbook(referenceData.materialItems, result.materials.lines, input.materials);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = excelFileName(coverInfo.client, coverInfo.project);
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="space-y-6">
@@ -42,6 +64,15 @@ export default function MaterialsPage() {
               {category}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={!hasExportableRows}
+            title={hasExportableRows ? undefined : 'Set a quantity on at least one material to export'}
+            className="rounded bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-1.5 transition-colors"
+          >
+            Export to Excel
+          </button>
         </div>
       </div>
 
