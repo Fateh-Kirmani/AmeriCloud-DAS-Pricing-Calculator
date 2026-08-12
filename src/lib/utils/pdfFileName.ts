@@ -14,3 +14,13 @@ export function pdfFileName(client: string, project: string): string {
   const date = new Date().toISOString().slice(0, 10);
   return `Estimate-${date}.pdf`;
 }
+
+export function excelFileName(client: string, project: string): string {
+  const trimmedClient = sanitizeFileNamePart(client.trim());
+  const trimmedProject = sanitizeFileNamePart(project.trim());
+  if (trimmedClient && trimmedProject) {
+    return `${trimmedClient}-${trimmedProject}-Estimate.xlsx`;
+  }
+  const date = new Date().toISOString().slice(0, 10);
+  return `Estimate-${date}.xlsx`;
+}
