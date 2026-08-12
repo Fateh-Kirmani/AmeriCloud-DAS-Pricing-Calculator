@@ -1,7 +1,12 @@
 import { notFound } from 'next/navigation';
 import { prisma } from '@/lib/db';
 import { loadProjectReferenceData, loadProjectEstimateDefaults } from '@/lib/data/loadProjectReferenceData';
-import { EstimateProvider, normalizeDraft } from '@/lib/estimate/EstimateContext';
+import { EstimateProvider } from '@/lib/estimate/EstimateContext';
+// Imported from the plain (non-'use client') sibling module, not from EstimateContext.tsx: Next.js
+// turns every export of a 'use client' module — including re-exports — into a client-reference
+// proxy when imported from a Server Component like this layout, so calling normalizeDraft() as a
+// plain function only works if it comes from a module with no 'use client' directive.
+import { normalizeDraft } from '@/lib/estimate/draft';
 import { AppShell } from '@/components/AppShell';
 
 export const dynamic = 'force-dynamic';
