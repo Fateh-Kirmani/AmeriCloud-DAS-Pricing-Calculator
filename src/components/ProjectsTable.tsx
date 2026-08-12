@@ -28,8 +28,13 @@ export function ProjectsTable({ projects }: { projects: ProjectRow[] }) {
 
   async function handleDelete(id: string) {
     if (!window.confirm('Delete this project? This cannot be undone.')) return;
-    await deleteProject(id);
-    router.refresh();
+    try {
+      await deleteProject(id);
+      router.refresh();
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      alert('Something went wrong deleting the project. Please try again.');
+    }
   }
 
   return (
