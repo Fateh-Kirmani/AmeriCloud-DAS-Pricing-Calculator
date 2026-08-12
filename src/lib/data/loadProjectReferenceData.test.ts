@@ -26,7 +26,14 @@ describe('loadProjectReferenceData / loadProjectEstimateDefaults (integration â€
     expect(projectData.materialItems).toHaveLength(masterData.materialItems.length);
     expect(projectData.laborTasks).toHaveLength(masterData.laborTasks.length);
     expect(projectData.laborRates).toEqual(masterData.laborRates);
-    expect(projectData.crewSizeTable).toEqual(masterData.crewSizeTable);
+    // crewSizeTable is fetched with no `orderBy` (neither query sorts it, and no downstream
+    // consumer needs a stable order â€” the calc engine looks rows up by technicianCount, not by
+    // array position), so comparing by unsorted array equality is flaky: Postgres doesn't
+    // guarantee row order for a query with no ORDER BY. Sort both sides by technicianCount
+    // (the natural, stable key) before comparing.
+    const byTechnicianCount = <T extends { technicianCount: number }>(rows: T[]) =>
+      [...rows].sort((a, b) => a.technicianCount - b.technicianCount);
+    expect(byTechnicianCount(projectData.crewSizeTable)).toEqual(byTechnicianCount(masterData.crewSizeTable));
     expect(projectData.laborProjectionSettings).toEqual(masterData.laborProjectionSettings);
 
     const bom3 = projectData.materialItems.find((m) => m.key === 'bom-3');
