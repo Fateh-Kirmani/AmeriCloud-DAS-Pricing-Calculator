@@ -28,7 +28,7 @@ function scrollToLaborCategory(sheet: 'LOE' | 'SOW', category: string) {
 
 export default function LaborPage() {
   const {
-    referenceData, input, result, setLoeTaskQuantity, setSowTaskQuantity, setTechnicianCount,
+    referenceData, input, result, setLoeTaskQuantity, setSowTaskQuantity, setTechnicianCount, projectId,
   } = useEstimate();
   const [activeSheet, setActiveSheet] = useState<'LOE' | 'SOW'>('LOE');
   const [search, setSearch] = useState('');
@@ -185,7 +185,7 @@ export default function LaborPage() {
         </div>
       </div>
 
-      <MoveToButton href="/pass-throughs" label="→ Pass Throughs" />
+      <MoveToButton href={`/project/${projectId}/pass-throughs`} label="→ Pass Throughs" />
     </div>
   );
 }

@@ -48,7 +48,7 @@ function updateKeyQtyLine(lines: { key: string; qty: number }[], key: string, qt
 }
 
 export default function PassThroughsPage() {
-  const { referenceData, input, result, setPassThroughs } = useEstimate();
+  const { referenceData, input, result, setPassThroughs, projectId } = useEstimate();
   const pt = input.passThroughs;
 
   return (
@@ -227,7 +227,7 @@ export default function PassThroughsPage() {
         <span>{formatCurrency(result.passThroughs.grandTotal)}</span>
       </div>
 
-      <MoveToButton href="/summary" label="→ Executive Summary" />
+      <MoveToButton href={`/project/${projectId}/summary`} label="→ Executive Summary" />
     </div>
   );
 }

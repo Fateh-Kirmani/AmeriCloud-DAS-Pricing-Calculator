@@ -6,7 +6,7 @@ import { MoveToButton } from '@/components/MoveToButton';
 const CUSTOMER_TYPES = ['Direct Customer', 'General Contractor', 'Sub/Tier'];
 
 export default function CoverInfoPage() {
-  const { coverInfo, setCoverInfo } = useEstimate();
+  const { coverInfo, setCoverInfo, projectId } = useEstimate();
 
   return (
     <div className="max-w-3xl mx-auto bg-white rounded-lg shadow p-8">
@@ -112,7 +112,7 @@ export default function CoverInfoPage() {
       </div>
 
       <div className="mt-8">
-        <MoveToButton href="/materials" label="→ Materials" />
+        <MoveToButton href={`/project/${projectId}/materials`} label="→ Materials" />
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ function scrollToCategory(category: MaterialCategory) {
 }
 
 export default function MaterialsPage() {
-  const { referenceData, input, result, setMaterialQuantity, setContingencyPct, setShippingHandling, coverInfo } = useEstimate();
+  const { referenceData, input, result, setMaterialQuantity, setContingencyPct, setShippingHandling, coverInfo, projectId } = useEstimate();
   const [search, setSearch] = useState('');
   const [onlyWithQty, setOnlyWithQty] = useState(false);
 
@@ -195,7 +195,7 @@ export default function MaterialsPage() {
         </div>
       </div>
 
-      <MoveToButton href="/labor" label="→ Labor" />
+      <MoveToButton href={`/project/${projectId}/labor`} label="→ Labor" />
     </div>
   );
 }
