@@ -113,7 +113,8 @@ export async function updateProjectMaterial(projectId: string, id: string, value
 }
 
 export async function deleteProjectMaterial(projectId: string, id: string): Promise<ActionResult> {
-  await prisma.projectMaterialItem.deleteMany({ where: { id, projectId } });
+  const result = await prisma.projectMaterialItem.deleteMany({ where: { id, projectId } });
+  if (result.count === 0) return { error: 'Material not found in this project.' };
   revalidatePath(`/project/${projectId}`, 'layout');
   return {};
 }

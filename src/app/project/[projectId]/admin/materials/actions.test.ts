@@ -109,6 +109,22 @@ describe('project material admin actions (integration — requires a live, seede
     expect(gone).toBeNull();
   });
 
+  it('returns a not-found error when deleting a mismatched project/id pair, and deletes nothing', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const materialA = await prisma.projectMaterialItem.create({
+      data: { projectId: projectA, key: 'test-proj-material-mismatch', type: 'T', description: 'D', category: 'Consumable', unitCost: 1 },
+    });
+
+    const result = await deleteProjectMaterial(projectB, materialA.id);
+    expect(result.error).toMatch(/not found/);
+
+    const stillThere = await prisma.projectMaterialItem.findUnique({ where: { id: materialA.id } });
+    expect(stillThere).toMatchObject({ projectId: projectA, type: 'T' });
+  });
+
   it('rejects a negative unit cost', async () => {
     const { id: projectId } = await createProject();
     projectIds.push(projectId);
