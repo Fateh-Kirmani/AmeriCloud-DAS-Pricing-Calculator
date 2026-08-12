@@ -87,11 +87,23 @@ This was sub-project B of a larger three-part request from the user (the other t
 - Made "Mark-Up %" editable on the Executive Summary page (sets `laborMarkupPct = passThroughMarkupPct = materialMarkupPct` to the typed value) and added a new editable "Mark-Up % Post Tweak" row that reads/writes the same `marginTweak` as the existing "Tweak for Margin Target ($)" field — the post-tweak percent itself is a one-line derived value computed inline in `summary/page.tsx`, not a new calc-engine field, per the spec's explicit "no changes to `executiveSummary.ts`" constraint.
 - Verified: 119/119 tests passing (24 files), `tsc --noEmit` clean, `npm run build` succeeds (16 routes), and the paired-field sync ($ tweak ↔ post-tweak %) and both $0-break-even no-op cases were confirmed live in-browser via Playwright.
 
+## Status: Materials → Excel Export — COMPLETE (merged to main)
+
+Spec: `docs/superpowers/specs/2026-08-12-materials-excel-export-design.md`. Plan: `docs/superpowers/plans/2026-08-12-materials-excel-export.md`.
+
+This was sub-project C of the same three-part request as above (B is done; A — multi-project support — remains, see "What to do next").
+
+- Added a green "Export to Excel" button to the Materials page. Building block: `src/lib/export/materialsWorkbook.ts`'s pure `buildMaterialsWorkbook(materialItems, lines, quantities)`, unit-tested by round-tripping through `exceljs`'s own `writeBuffer`/`load` rather than asserting on internal object shape.
+- Only `Consumable` and `DAS Materials` sheets are ever produced (currently the only two categories with seed data — `BAT Materials` is an accepted, explicit scope boundary, not an oversight), each containing only `quantity > 0` rows, with a bold header row, a `"$"#,##0.00` number format on Unit Cost/Ext Cost, and a bold "Total" row summing Ext Cost. A sheet is omitted entirely if it has zero qualifying rows. The button is disabled with an explanatory tooltip when nothing qualifies across both categories.
+- `src/lib/utils/pdfFileName.ts` gained a sibling `excelFileName()` export reusing its existing `sanitizeFileNamePart` helper.
+- `exceljs` is dynamically imported (`await import('@/lib/export/materialsWorkbook')`) inside the click handler, not statically at module scope — mirrors the existing PDF export's dynamic import and keeps the ~255 kB library out of the Materials page's base bundle (confirmed via `npm run build`: `/materials` stayed at ~2.8 kB / 102 kB First Load JS instead of ballooning to 258 kB / 357 kB).
+- Verified: 128/128 tests passing (25 files), `tsc --noEmit` clean, `npm run build` succeeds (16 routes), and the actual downloaded `.xlsx` file's sheets/headers/values/formatting were inspected directly (via a Node script reading the file with `exceljs`) after driving the button through a live browser with Playwright — not just DOM assertions.
+- `exceljs`'s dependency tree adds one **moderate** transitive `npm audit` finding (an old `uuid` with a buffer-bounds bug that requires a caller-supplied buffer, which `exceljs` never does — it's internal-only ID generation). Not fixed, and deliberately not run through `npm audit fix --force`, which would downgrade `exceljs` to an ancient 3.x release and bump `next` 14→16 — both far outside this task's scope. The remaining high/critical `npm audit` findings (`next`, `postcss`, `esbuild`/`vite`) predate this work entirely.
+
 ## What to do next
 
-Two sub-projects remain from the user's original three-part request, in their confirmed order:
+One sub-project remains from the user's original three-part request:
 
-- **C — Materials → Excel export** (next up): a green "Export to Excel" button on the Materials page, exporting only non-zero-quantity rows into a 2-sheet `.xlsx` (Consumable, DAS Materials) with columns TYPE, MANUFACTURER/MODEL, DESCRIPTION, UNIT COST, QTY, EXT COST. Needs a new dependency (e.g. `xlsx` or `exceljs`, not yet installed) and its own brainstorming/design pass.
 - **A — Multi-project support** (largest, not yet designed): a landing page (Create New Project / Explore Current Projects), a new persisted `Project` entity (today there's only one in-memory/localStorage estimate), an "All Projects" page (sidebar-less, with a Name/Client search filter and Edit/Delete), an unsaved-changes confirmation dialog when leaving a project, and removing Admin's password protection while scoping all 9 currently-global reference-data tables per-project (defaulting new projects to the current global values).
 
 Minor items noted for later (non-blocking, carried over from earlier phases): the Materials `percentOfTotal` display field's denominator should be reconciled against the workbook's display column; the crew-size technician-count input should be constrained to 1–20 in the UI; consider `next/font` instead of the current Google Fonts `@import` in `globals.css`; PDF generation (`BlobProvider`) regenerates on every summary-page keystroke instead of gating behind the Export click; `pdfFileName.ts` doesn't sanitize filesystem-unsafe characters; `Number(e.target.value)` produces `NaN` on empty/partial numeric input across several pages.
