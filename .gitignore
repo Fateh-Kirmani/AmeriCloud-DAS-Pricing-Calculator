@@ -7,3 +7,4 @@ prisma/dev.db
 *.tsbuildinfo
 .vercel
 .env*
+.superpowers/
