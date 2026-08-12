@@ -8,8 +8,13 @@ export default function LandingPage() {
   const router = useRouter();
 
   async function handleCreateNewProject() {
-    const { id } = await createProject();
-    router.push(`/project/${id}`);
+    try {
+      const { id } = await createProject();
+      router.push(`/project/${id}`);
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      alert('Something went wrong creating the project. Please try again.');
+    }
   }
 
   return (
