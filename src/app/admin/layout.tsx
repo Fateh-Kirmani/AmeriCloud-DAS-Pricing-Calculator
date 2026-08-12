@@ -12,8 +12,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </span>
           <span className="font-display text-lg font-semibold text-white">DAS Bid Estimator</span>
         </div>
-        <Link href="/" className="font-body text-sm text-white/70 transition-colors hover:text-white">
-          ← Back to Estimator
+        <Link href="/projects" className="font-body text-sm text-white/70 transition-colors hover:text-white">
+          ← Back to Projects
         </Link>
       </header>
       <main className="p-6">{children}</main>
