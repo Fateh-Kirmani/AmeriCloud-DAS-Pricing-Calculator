@@ -1,15 +1,16 @@
+// src/lib/estimate/EstimateContext.tsx
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildEstimateResult } from '@/lib/calc';
 import type {
   EstimateInput, EstimateResult, LaborTaskLineInput, MarkupInputs,
   MaterialLineInput, PassThroughInput, ReferenceData,
 } from '@/lib/calc';
 import type { EstimateDefaultsData } from '@/lib/data/loadReferenceData';
+import { saveProjectDraft } from '@/lib/project/saveProjectDraft';
 import { upsertLine } from './upsertLine';
 
-const DRAFT_STORAGE_KEY = 'das-estimate-draft-v1';
 const PERSIST_DEBOUNCE_MS = 500;
 
 export interface PersistedDraft {
@@ -22,16 +23,6 @@ export interface PersistedDraft {
   technicianCount: number;
   passThroughs: PassThroughInput;
   markups: MarkupInputs;
-}
-
-function loadDraft(): PersistedDraft | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as PersistedDraft) : null;
-  } catch {
-    return null;
-  }
 }
 
 export interface CoverInfo {
@@ -54,7 +45,29 @@ const EMPTY_COVER_INFO: CoverInfo = {
   jobSiteAddress: '', projectOverview: '',
 };
 
+function buildBlankDraft(estimateDefaults: EstimateDefaultsData): PersistedDraft {
+  return {
+    coverInfo: EMPTY_COVER_INFO,
+    materials: [],
+    contingencyPct: estimateDefaults.contingencyPct,
+    shippingHandling: 0,
+    loeTasks: [],
+    sowTasks: [],
+    technicianCount: 4,
+    passThroughs: { perDiem: [], lodging: [], travel: [], airfare: [], rentals: [], softCosts: [] },
+    markups: {
+      laborMarkupPct: estimateDefaults.laborMarkupPct,
+      passThroughMarkupPct: estimateDefaults.passThroughMarkupPct,
+      materialMarkupPct: estimateDefaults.materialMarkupPct,
+      corporateMarkupPct: estimateDefaults.corporateMarkupPct,
+      marginTweak: 0,
+      taxRate: estimateDefaults.taxRate,
+    },
+  };
+}
+
 interface EstimateContextValue {
+  projectId: string;
   referenceData: ReferenceData;
   coverInfo: CoverInfo;
   setCoverInfo: (patch: Partial<CoverInfo>) => void;
@@ -68,101 +81,74 @@ interface EstimateContextValue {
   setTechnicianCount: (count: number) => void;
   setPassThroughs: (patch: Partial<PassThroughInput>) => void;
   setMarkups: (patch: Partial<MarkupInputs>) => void;
+  flushSave: () => Promise<void>;
 }
 
 const EstimateContext = createContext<EstimateContextValue | null>(null);
 
+interface PendingSave {
+  draft: PersistedDraft;
+  draftJson: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export function EstimateProvider({
+  projectId,
   referenceData,
   estimateDefaults,
+  initialDraft,
   children,
 }: {
+  projectId: string;
   referenceData: ReferenceData;
   estimateDefaults: EstimateDefaultsData;
+  initialDraft: PersistedDraft | null;
   children: ReactNode;
 }) {
-  const [coverInfo, setCoverInfoState] = useState<CoverInfo>(EMPTY_COVER_INFO);
-  const [materials, setMaterials] = useState<MaterialLineInput[]>([]);
-  const [contingencyPct, setContingencyPct] = useState(estimateDefaults.contingencyPct);
-  const [shippingHandling, setShippingHandling] = useState(0);
-  const [loeTasks, setLoeTasks] = useState<LaborTaskLineInput[]>([]);
-  const [sowTasks, setSowTasks] = useState<LaborTaskLineInput[]>([]);
-  const [technicianCount, setTechnicianCount] = useState(4);
-  const [passThroughs, setPassThroughsState] = useState<PassThroughInput>({
-    perDiem: [], lodging: [], travel: [], airfare: [], rentals: [], softCosts: [],
-  });
-  const [markups, setMarkupsState] = useState<MarkupInputs>({
-    laborMarkupPct: estimateDefaults.laborMarkupPct,
-    passThroughMarkupPct: estimateDefaults.passThroughMarkupPct,
-    materialMarkupPct: estimateDefaults.materialMarkupPct,
-    corporateMarkupPct: estimateDefaults.corporateMarkupPct,
-    marginTweak: 0,
-    taxRate: estimateDefaults.taxRate,
-  });
+  const [baseline] = useState<PersistedDraft>(() => initialDraft ?? buildBlankDraft(estimateDefaults));
 
-  const [isRehydrated, setIsRehydrated] = useState(false);
+  const [coverInfo, setCoverInfoState] = useState<CoverInfo>(baseline.coverInfo);
+  const [materials, setMaterials] = useState<MaterialLineInput[]>(baseline.materials);
+  const [contingencyPct, setContingencyPct] = useState(baseline.contingencyPct);
+  const [shippingHandling, setShippingHandling] = useState(baseline.shippingHandling);
+  const [loeTasks, setLoeTasks] = useState<LaborTaskLineInput[]>(baseline.loeTasks);
+  const [sowTasks, setSowTasks] = useState<LaborTaskLineInput[]>(baseline.sowTasks);
+  const [technicianCount, setTechnicianCount] = useState(baseline.technicianCount);
+  const [passThroughs, setPassThroughsState] = useState<PassThroughInput>(baseline.passThroughs);
+  const [markups, setMarkupsState] = useState<MarkupInputs>(baseline.markups);
 
-  // Rehydrate a previously-saved draft once, after mount. This must run in an effect (not a
-  // lazy useState initializer) — localStorage doesn't exist during SSR, and computing the
-  // initial value differently on the server vs. the client would cause a hydration mismatch.
+  const lastSavedJsonRef = useRef(JSON.stringify(baseline));
+  const pendingSaveRef = useRef<PendingSave | null>(null);
+
+  const currentDraft: PersistedDraft = {
+    coverInfo, materials, contingencyPct, shippingHandling, loeTasks, sowTasks,
+    technicianCount, passThroughs, markups,
+  };
+
+  const isDirty = JSON.stringify(currentDraft) !== lastSavedJsonRef.current;
+
+  // Debounced autosave: write the current draft to the database shortly after any change.
+  // Comparing against lastSavedJsonRef before scheduling a save is what naturally prevents a
+  // redundant save firing right after the initial mount — currentDraft equals baseline (and
+  // therefore lastSavedJsonRef's initial value) at that point, so this returns early.
   useEffect(() => {
-    const draft = loadDraft();
-    if (draft) {
-      setCoverInfoState(draft.coverInfo);
-      setMaterials(draft.materials);
-      setContingencyPct(draft.contingencyPct);
-      setShippingHandling(draft.shippingHandling);
-      setLoeTasks(draft.loeTasks);
-      setSowTasks(draft.sowTasks);
-      setTechnicianCount(draft.technicianCount);
-      setPassThroughsState(draft.passThroughs);
-      setMarkupsState(draft.markups);
-    }
-    setIsRehydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const isDirty =
-    Object.values(coverInfo).some((v) => v !== '') ||
-    materials.length > 0 ||
-    loeTasks.length > 0 ||
-    sowTasks.length > 0 ||
-    technicianCount !== 4 ||
-    shippingHandling !== 0 ||
-    passThroughs.perDiem.length > 0 ||
-    passThroughs.lodging.length > 0 ||
-    passThroughs.travel.length > 0 ||
-    passThroughs.airfare.length > 0 ||
-    passThroughs.rentals.length > 0 ||
-    passThroughs.softCosts.length > 0 ||
-    markups.marginTweak !== 0;
-
-  // Debounced persistence: write the current draft to localStorage shortly after any change.
-  // Gated on isRehydrated so the initial (pre-load) render never overwrites a saved draft
-  // before it's had a chance to load.
-  useEffect(() => {
-    if (!isRehydrated) return;
+    const draftJson = JSON.stringify(currentDraft);
+    if (draftJson === lastSavedJsonRef.current) return;
     const timer = setTimeout(() => {
-      if (!isDirty) {
-        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-        return;
-      }
-      const draft: PersistedDraft = {
-        coverInfo, materials, contingencyPct, shippingHandling, loeTasks, sowTasks,
-        technicianCount, passThroughs, markups,
-      };
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      saveProjectDraft(projectId, currentDraft);
+      lastSavedJsonRef.current = draftJson;
+      pendingSaveRef.current = null;
     }, PERSIST_DEBOUNCE_MS);
+    pendingSaveRef.current = { draft: currentDraft, draftJson, timer };
     return () => clearTimeout(timer);
   }, [
-    isRehydrated, isDirty, coverInfo, materials, contingencyPct, shippingHandling,
+    projectId, coverInfo, materials, contingencyPct, shippingHandling,
     loeTasks, sowTasks, technicianCount, passThroughs, markups,
   ]);
 
-  // Warn on an actual browser unload (refresh, close, external navigation) when there's
-  // unsaved work. Does not fire for in-app client-side route transitions (e.g. the sidebar's
-  // Admin link) — those are covered by the rehydrate-on-mount effect above instead, since
-  // navigating to a different route group unmounts and later remounts this provider.
+  // Warn on an actual browser unload (refresh, close, external navigation) when there's a
+  // pending change that hasn't been saved yet. In-app navigation (e.g. the sidebar's All
+  // Projects button) instead calls flushSave() directly and never hits this path.
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
       if (!isDirty) return;
@@ -173,6 +159,15 @@ export function EstimateProvider({
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
+  async function flushSave(): Promise<void> {
+    const pending = pendingSaveRef.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingSaveRef.current = null;
+    await saveProjectDraft(projectId, pending.draft);
+    lastSavedJsonRef.current = pending.draftJson;
+  }
+
   const input: EstimateInput = useMemo(
     () => ({ materials, contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs, markups }),
     [materials, contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs, markups],
@@ -181,6 +176,7 @@ export function EstimateProvider({
   const result = useMemo(() => buildEstimateResult(input, referenceData), [input, referenceData]);
 
   const value: EstimateContextValue = {
+    projectId,
     referenceData,
     coverInfo,
     setCoverInfo: (patch) => setCoverInfoState((prev) => ({ ...prev, ...patch })),
@@ -194,6 +190,7 @@ export function EstimateProvider({
     setTechnicianCount,
     setPassThroughs: (patch) => setPassThroughsState((prev) => ({ ...prev, ...patch })),
     setMarkups: (patch) => setMarkupsState((prev) => ({ ...prev, ...patch })),
+    flushSave,
   };
 
   return <EstimateContext.Provider value={value}>{children}</EstimateContext.Provider>;

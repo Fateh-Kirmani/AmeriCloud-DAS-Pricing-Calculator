@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { EstimateProvider, useEstimate } from './EstimateContext';
+import { EstimateProvider, useEstimate, type PersistedDraft } from './EstimateContext';
+import { saveProjectDraft } from '@/lib/project/saveProjectDraft';
 import type { ReferenceData } from '@/lib/calc';
 
-const DRAFT_STORAGE_KEY = 'das-estimate-draft-v1';
+vi.mock('@/lib/project/saveProjectDraft', () => ({
+  saveProjectDraft: vi.fn().mockResolvedValue(undefined),
+}));
 
 const referenceData: ReferenceData = {
   materialItems: [
@@ -35,25 +38,26 @@ const estimateDefaults = {
 };
 
 function TestConsumer() {
-  const { result, setMaterialQuantity, coverInfo, setCoverInfo } = useEstimate();
+  const { result, setMaterialQuantity, coverInfo, setCoverInfo, flushSave } = useEstimate();
   return (
     <div>
       <div data-testid="hardware-total">{result.materials.hardwareTotal}</div>
       <div data-testid="client-name">{coverInfo.client}</div>
       <button onClick={() => setMaterialQuantity('bom-3', 2)}>Set Qty</button>
       <button onClick={() => setCoverInfo({ client: 'Acme Corp' })}>Set Client</button>
+      <button onClick={() => flushSave()}>Flush</button>
     </div>
   );
 }
 
 describe('EstimateProvider / useEstimate', () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    vi.clearAllMocks();
   });
 
   it('recomputes the result when a material quantity is set', () => {
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
         <TestConsumer />
       </EstimateProvider>,
     );
@@ -66,7 +70,7 @@ describe('EstimateProvider / useEstimate', () => {
 
   it('updates cover info independently of the estimate calculation', () => {
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
         <TestConsumer />
       </EstimateProvider>,
     );
@@ -75,8 +79,8 @@ describe('EstimateProvider / useEstimate', () => {
     expect(screen.getByTestId('client-name').textContent).toBe('Acme Corp');
   });
 
-  it('rehydrates a previously-saved draft from localStorage on mount', () => {
-    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify({
+  it('initializes state from the initialDraft prop instead of a blank estimate', () => {
+    const initialDraft: PersistedDraft = {
       coverInfo: {
         client: 'Restored Corp', project: '', rfpDate: '', bidDueDate: '', estimator: '',
         contactName: '', contactPhone: '', contactEmail: '', customerType: '',
@@ -93,10 +97,10 @@ describe('EstimateProvider / useEstimate', () => {
         laborMarkupPct: 0.25, passThroughMarkupPct: 0.25, materialMarkupPct: 0.25,
         corporateMarkupPct: 0.05, marginTweak: 0, taxRate: 0.0825,
       },
-    }));
+    };
 
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={initialDraft}>
         <TestConsumer />
       </EstimateProvider>,
     );
@@ -106,32 +110,53 @@ describe('EstimateProvider / useEstimate', () => {
     expect(screen.getByTestId('hardware-total').textContent).toBe('15460.5');
   });
 
-  it('persists a dirty estimate to localStorage after the debounce window', () => {
+  it('calls saveProjectDraft after the debounce window once something changes', async () => {
     vi.useFakeTimers();
     try {
       render(
-        <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
           <TestConsumer />
         </EstimateProvider>,
       );
 
-      fireEvent.click(screen.getByText('Set Client'));
-      expect(window.localStorage.getItem(DRAFT_STORAGE_KEY)).toBeNull();
+      expect(saveProjectDraft).not.toHaveBeenCalled();
 
-      act(() => {
+      fireEvent.click(screen.getByText('Set Client'));
+      expect(saveProjectDraft).not.toHaveBeenCalled();
+
+      await act(async () => {
         vi.advanceTimersByTime(500);
       });
 
-      const stored = JSON.parse(window.localStorage.getItem(DRAFT_STORAGE_KEY)!);
-      expect(stored.coverInfo.client).toBe('Acme Corp');
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+      const [projectId, draft] = vi.mocked(saveProjectDraft).mock.calls[0]!;
+      expect(projectId).toBe('proj-1');
+      expect(draft.coverInfo.client).toBe('Acme Corp');
     } finally {
       vi.useRealTimers();
     }
   });
 
+  it('flushSave immediately saves a pending change without waiting for the debounce', async () => {
+    render(
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+        <TestConsumer />
+      </EstimateProvider>,
+    );
+
+    fireEvent.click(screen.getByText('Set Client'));
+    expect(saveProjectDraft).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Flush'));
+    });
+
+    expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+  });
+
   it('does not warn before unload while the estimate is clean', () => {
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
         <TestConsumer />
       </EstimateProvider>,
     );
@@ -143,7 +168,7 @@ describe('EstimateProvider / useEstimate', () => {
 
   it('warns before unload once the estimate becomes dirty', () => {
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
         <TestConsumer />
       </EstimateProvider>,
     );

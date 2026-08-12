@@ -36,7 +36,7 @@ const estimateDefaults = {
 describe('SummaryStrip', () => {
   it('renders zeroed totals for an empty estimate', () => {
     render(
-      <EstimateProvider referenceData={referenceData} estimateDefaults={estimateDefaults}>
+      <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
         <SummaryStrip />
       </EstimateProvider>,
     );
