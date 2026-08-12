@@ -39,7 +39,14 @@ export function Sidebar() {
   }, []);
 
   async function handleAllProjectsClick() {
-    await flushSave();
+    try {
+      await flushSave();
+    } catch (error) {
+      // Don't trap the user on the page just because the save failed — at worst this loses the
+      // last debounce window's edit, and the failed draft is still retried by EstimateContext's
+      // own retry path (a later flushSave() or edit) independent of this navigation.
+      console.error('Failed to save before navigating:', error);
+    }
     router.push('/projects');
   }
 
