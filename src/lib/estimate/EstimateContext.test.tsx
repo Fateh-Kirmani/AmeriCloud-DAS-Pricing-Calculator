@@ -45,6 +45,7 @@ function TestConsumer() {
       <div data-testid="client-name">{coverInfo.client}</div>
       <button onClick={() => setMaterialQuantity('bom-3', 2)}>Set Qty</button>
       <button onClick={() => setCoverInfo({ client: 'Acme Corp' })}>Set Client</button>
+      <button onClick={() => setCoverInfo({ client: '' })}>Clear Client</button>
       <button onClick={() => flushSave()}>Flush</button>
     </div>
   );
@@ -152,6 +153,66 @@ describe('EstimateProvider / useEstimate', () => {
     });
 
     expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not resave via flushSave after an edit is reverted within the debounce window', async () => {
+    // Regression test for a bug where the autosave effect's early-return branch (taken when
+    // the current draft equals the last-saved draft again, e.g. after an edit is reverted)
+    // failed to clear pendingSaveRef. That left flushSave() re-persisting a stale, already-
+    // superseded draft even though nothing was actually pending anymore.
+    vi.useFakeTimers();
+    try {
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+      act(() => {
+        vi.advanceTimersByTime(200); // still within the 500ms debounce window
+      });
+      fireEvent.click(screen.getByText('Clear Client')); // reverts to the last-saved baseline
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(saveProjectDraft).not.toHaveBeenCalled();
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Flush'));
+      });
+      expect(saveProjectDraft).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops warning before unload once a pending autosave completes', async () => {
+    // Regression test for a bug where lastSavedJsonRef was a plain ref: mutating it inside the
+    // debounce timer's callback didn't trigger a re-render, so isDirty (and the beforeunload
+    // listener's closure over it) stayed stale after a successful autosave.
+    vi.useFakeTimers();
+    try {
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not warn before unload while the estimate is clean', () => {

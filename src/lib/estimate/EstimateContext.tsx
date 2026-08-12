@@ -117,7 +117,7 @@ export function EstimateProvider({
   const [passThroughs, setPassThroughsState] = useState<PassThroughInput>(baseline.passThroughs);
   const [markups, setMarkupsState] = useState<MarkupInputs>(baseline.markups);
 
-  const lastSavedJsonRef = useRef(JSON.stringify(baseline));
+  const [lastSavedJson, setLastSavedJson] = useState(() => JSON.stringify(baseline));
   const pendingSaveRef = useRef<PendingSave | null>(null);
 
   const currentDraft: PersistedDraft = {
@@ -125,24 +125,33 @@ export function EstimateProvider({
     technicianCount, passThroughs, markups,
   };
 
-  const isDirty = JSON.stringify(currentDraft) !== lastSavedJsonRef.current;
+  const isDirty = JSON.stringify(currentDraft) !== lastSavedJson;
 
   // Debounced autosave: write the current draft to the database shortly after any change.
-  // Comparing against lastSavedJsonRef before scheduling a save is what naturally prevents a
+  // Comparing against lastSavedJson before scheduling a save is what naturally prevents a
   // redundant save firing right after the initial mount — currentDraft equals baseline (and
-  // therefore lastSavedJsonRef's initial value) at that point, so this returns early.
+  // therefore lastSavedJson's initial value) at that point, so this returns early. lastSavedJson
+  // is tracked as state (not a plain ref) so that a completed autosave triggers a re-render,
+  // which in turn recomputes isDirty and re-attaches the beforeunload listener with a fresh
+  // closure — otherwise a successful save right before an unload could still warn as dirty.
   useEffect(() => {
     const draftJson = JSON.stringify(currentDraft);
-    if (draftJson === lastSavedJsonRef.current) return;
+    if (draftJson === lastSavedJson) {
+      // Nothing changed relative to the last save. Also clear any pending save that was
+      // scheduled by an earlier edit but has since been reverted (e.g. edit then undo within
+      // the debounce window) — otherwise flushSave() would re-persist that now-stale draft.
+      pendingSaveRef.current = null;
+      return;
+    }
     const timer = setTimeout(() => {
       saveProjectDraft(projectId, currentDraft);
-      lastSavedJsonRef.current = draftJson;
+      setLastSavedJson(draftJson);
       pendingSaveRef.current = null;
     }, PERSIST_DEBOUNCE_MS);
     pendingSaveRef.current = { draft: currentDraft, draftJson, timer };
     return () => clearTimeout(timer);
   }, [
-    projectId, coverInfo, materials, contingencyPct, shippingHandling,
+    projectId, lastSavedJson, coverInfo, materials, contingencyPct, shippingHandling,
     loeTasks, sowTasks, technicianCount, passThroughs, markups,
   ]);
 
@@ -165,7 +174,7 @@ export function EstimateProvider({
     clearTimeout(pending.timer);
     pendingSaveRef.current = null;
     await saveProjectDraft(projectId, pending.draft);
-    lastSavedJsonRef.current = pending.draftJson;
+    setLastSavedJson(pending.draftJson);
   }
 
   const input: EstimateInput = useMemo(
