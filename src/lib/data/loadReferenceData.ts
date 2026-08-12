@@ -12,7 +12,7 @@ export interface EstimateDefaultsData {
   contingencyPct: number;
 }
 
-const CATEGORY_FROM_DB: Record<MaterialCategory, MaterialItem['category']> = {
+export const CATEGORY_FROM_DB: Record<MaterialCategory, MaterialItem['category']> = {
   Consumable: 'Consumable',
   DAS_Materials: 'DAS Materials',
   BAT_Materials: 'BAT Materials',
@@ -27,7 +27,7 @@ const ROLE_FROM_DB: Record<LaborRoleName, LaborRole> = {
   Project_Manager: 'Project Manager',
 };
 
-function mapRole(role: LaborRoleName): LaborRole {
+export function mapRole(role: LaborRoleName): LaborRole {
   const mapped = ROLE_FROM_DB[role];
   if (!mapped) throw new Error(`Unknown labor role from DB: ${role}`);
   return mapped;
@@ -59,7 +59,7 @@ export function parseDerivedFrom(json: unknown, taskKey: string): LaborTaskDeriv
   return { terms, divisor: (json as { divisor: number }).divisor };
 }
 
-function mapRoleRate(rows: { role: LaborRoleName; amount: number }[]): { role: LaborRole; rate: number }[] {
+export function mapRoleRate(rows: { role: LaborRoleName; amount: number }[]): { role: LaborRole; rate: number }[] {
   return rows.map((r) => ({ role: mapRole(r.role), rate: r.amount }));
 }
 
@@ -72,7 +72,7 @@ const ROLE_ORDER: LaborRole[] = [
 // depending on the source workbook's row order. Sorting by the canonical role order here — once,
 // at the data layer — keeps every consumer (Per Diem, Lodging, Travel, Airfare sections) showing
 // roles in the same order, rather than patching each page's render loop separately.
-function sortByRole<T extends { role: LaborRole }>(rows: T[]): T[] {
+export function sortByRole<T extends { role: LaborRole }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
 }
 
