@@ -83,7 +83,7 @@ git commit -m "refactor: move estimator routes into a nested (estimator) group, 
 - Modify: `src/app/admin/(sections)/defaults/actions.ts`
 
 **Interfaces:**
-- Produces: `ActionResult`, `ValidationErr`, `parseNonNegative(raw: string | undefined): number | null`, `parsePercent(raw: string | undefined): number | null`, `parseNonNegativeInt(raw: string | undefined): number | null` — every task from here on imports these from `@/lib/admin/validation` instead of re-declaring them.
+- Produces: `ActionResult`, `ValidationErr`, `parseNonNegative(raw: string | undefined): number | null`, `parsePercent(raw: string | undefined): number | null`, `parseNonNegativeInt(raw: string | undefined): number | null`, `parseLabeledPercent(raw: string | undefined, label: string): number | { error: string }` — every task from here on imports these from `@/lib/admin/validation` instead of re-declaring them.
 
 - [ ] **Step 1: Create the shared module**
 
@@ -120,6 +120,13 @@ export function parseNonNegativeInt(raw: string | undefined): number | null {
   const value = Number(raw);
   if (Number.isNaN(value) || value < 0 || !Number.isInteger(value)) return null;
   return value;
+}
+
+export function parseLabeledPercent(raw: string | undefined, label: string): number | { error: string } {
+  if (raw === undefined || raw === '') return { error: `${label} is required.` };
+  const value = Number(raw);
+  if (Number.isNaN(value) || value < 0 || value > 100) return { error: `${label} must be between 0 and 100.` };
+  return value / 100;
 }
 ```
 
@@ -195,7 +202,7 @@ Then delete the now-duplicate local `interface ValidationErr { ok: false; error:
 
 - [ ] **Step 6: Refactor `defaults/actions.ts`**
 
-Replace lines 1-9 (the `'use server'` through the end of the local `interface ActionResult`) with:
+Replace lines 1-30 (the `'use server'` through the end of the local `function parsePercent`) with:
 
 ```ts
 'use server';
@@ -203,10 +210,10 @@ Replace lines 1-9 (the `'use server'` through the end of the local `interface Ac
 import { prisma } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/auth/adminAuth';
-import type { ActionResult, ValidationErr } from '@/lib/admin/validation';
+import { parseLabeledPercent, type ActionResult, type ValidationErr } from '@/lib/admin/validation';
 ```
 
-Then delete the now-duplicate local `interface ValidationErr { ok: false; error: string; }` block (currently lines 20-23, right after `DefaultsOk`). Leave the file's own bespoke `function parsePercent(raw: string | undefined, label: string): number | { error: string }` exactly as-is — it has a different signature than the shared `parsePercent` (it takes a field label and returns a labeled error object instead of `null`), so it is not part of this extraction; only the two types moved.
+Then delete the now-duplicate local `interface ValidationErr { ok: false; error: string; }` block (currently lines 20-23, right after `DefaultsOk`), and update every call site in `validateDefaultsValues` that currently calls the local `parsePercent(values.xxx, 'label')` to call `parseLabeledPercent(values.xxx, 'label')` instead (same arguments, just the renamed shared import — six call sites, one per field).
 
 - [ ] **Step 7: Run the existing test suite for all 5 sections**
 
@@ -1997,7 +2004,7 @@ git commit -m "feat: add per-project Pass Throughs admin section"
 - Create: `src/app/project/[projectId]/admin/defaults/page.tsx`
 
 **Interfaces:**
-- Consumes: `createProject` (Phase 1), `ActionResult`/`ValidationErr` (Task 2), the now-generic `EstimateDefaultsForm`.
+- Consumes: `createProject` (Phase 1), `ActionResult`/`ValidationErr`/`parseLabeledPercent` (Task 2), the now-generic `EstimateDefaultsForm`.
 - Produces: `updateProjectEstimateDefaults(projectId, values)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2064,7 +2071,7 @@ Create `src/app/project/[projectId]/admin/defaults/actions.ts`:
 
 import { prisma } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
-import type { ActionResult, ValidationErr } from '@/lib/admin/validation';
+import { parseLabeledPercent, type ActionResult, type ValidationErr } from '@/lib/admin/validation';
 
 interface DefaultsOk {
   ok: true;
@@ -2076,25 +2083,18 @@ interface DefaultsOk {
   contingencyPct: number;
 }
 
-function parsePercent(raw: string | undefined, label: string): number | { error: string } {
-  if (raw === undefined || raw === '') return { error: `${label} is required.` };
-  const value = Number(raw);
-  if (Number.isNaN(value) || value < 0 || value > 100) return { error: `${label} must be between 0 and 100.` };
-  return value / 100;
-}
-
 function validateDefaultsValues(values: Record<string, string>): DefaultsOk | ValidationErr {
-  const laborMarkupPct = parsePercent(values.laborMarkupPct, 'Labor markup %');
+  const laborMarkupPct = parseLabeledPercent(values.laborMarkupPct, 'Labor markup %');
   if (typeof laborMarkupPct !== 'number') return { ok: false, error: laborMarkupPct.error };
-  const passThroughMarkupPct = parsePercent(values.passThroughMarkupPct, 'Pass-through markup %');
+  const passThroughMarkupPct = parseLabeledPercent(values.passThroughMarkupPct, 'Pass-through markup %');
   if (typeof passThroughMarkupPct !== 'number') return { ok: false, error: passThroughMarkupPct.error };
-  const materialMarkupPct = parsePercent(values.materialMarkupPct, 'Material markup %');
+  const materialMarkupPct = parseLabeledPercent(values.materialMarkupPct, 'Material markup %');
   if (typeof materialMarkupPct !== 'number') return { ok: false, error: materialMarkupPct.error };
-  const corporateMarkupPct = parsePercent(values.corporateMarkupPct, 'Corporate markup %');
+  const corporateMarkupPct = parseLabeledPercent(values.corporateMarkupPct, 'Corporate markup %');
   if (typeof corporateMarkupPct !== 'number') return { ok: false, error: corporateMarkupPct.error };
-  const taxRate = parsePercent(values.taxRate, 'Tax rate');
+  const taxRate = parseLabeledPercent(values.taxRate, 'Tax rate');
   if (typeof taxRate !== 'number') return { ok: false, error: taxRate.error };
-  const contingencyPct = parsePercent(values.contingencyPct, 'Contingency %');
+  const contingencyPct = parseLabeledPercent(values.contingencyPct, 'Contingency %');
   if (typeof contingencyPct !== 'number') return { ok: false, error: contingencyPct.error };
   return {
     ok: true, laborMarkupPct, passThroughMarkupPct, materialMarkupPct, corporateMarkupPct, taxRate, contingencyPct,
