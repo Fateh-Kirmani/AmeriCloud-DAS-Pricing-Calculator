@@ -5,10 +5,7 @@ import { Prisma, type LaborRoleName, type LaborSheet } from '@prisma/client';
 import { parseDerivedFrom } from '@/lib/data/loadReferenceData';
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/auth/adminAuth';
-
-interface ActionResult {
-  error?: string;
-}
+import type { ActionResult, ValidationErr } from '@/lib/admin/validation';
 
 const VALID_SHEETS: LaborSheet[] = ['LOE', 'SOW'];
 const VALID_ROLES: LaborRoleName[] = [
@@ -25,10 +22,6 @@ interface LaborTaskOk {
   unit: string;
   laborRole: LaborRoleName;
   includedInSubtotal: boolean;
-}
-interface ValidationErr {
-  ok: false;
-  error: string;
 }
 
 function validateLaborTaskValues(values: Record<string, string>): LaborTaskOk | ValidationErr {

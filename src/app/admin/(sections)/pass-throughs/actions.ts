@@ -4,17 +4,7 @@ import { prisma } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/auth/adminAuth';
-
-interface ActionResult {
-  error?: string;
-}
-
-function parseNonNegative(raw: string | undefined): number | null {
-  if (raw === undefined || raw === '') return null;
-  const value = Number(raw);
-  if (Number.isNaN(value) || value < 0) return null;
-  return value;
-}
+import { parseNonNegative, type ActionResult, type ValidationErr } from '@/lib/admin/validation';
 
 export async function updatePassThroughRoleRate(id: string, values: Record<string, string>): Promise<ActionResult> {
   if (!(await requireAdminSession())) return { error: 'Not authenticated.' };
@@ -32,10 +22,6 @@ interface RentalOk {
   name: string;
   rate: number;
   unit: string;
-}
-interface ValidationErr {
-  ok: false;
-  error: string;
 }
 
 function validateRentalValues(values: Record<string, string>): RentalOk | ValidationErr {

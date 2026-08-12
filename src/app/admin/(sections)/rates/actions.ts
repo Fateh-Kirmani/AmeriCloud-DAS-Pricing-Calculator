@@ -3,31 +3,7 @@
 import { prisma } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/auth/adminAuth';
-
-interface ActionResult {
-  error?: string;
-}
-
-function parseNonNegative(raw: string | undefined): number | null {
-  if (raw === undefined || raw === '') return null;
-  const value = Number(raw);
-  if (Number.isNaN(value) || value < 0) return null;
-  return value;
-}
-
-function parsePercent(raw: string | undefined): number | null {
-  if (raw === undefined || raw === '') return null;
-  const value = Number(raw);
-  if (Number.isNaN(value) || value < 0 || value > 100) return null;
-  return value / 100;
-}
-
-function parseNonNegativeInt(raw: string | undefined): number | null {
-  if (raw === undefined || raw === '') return null;
-  const value = Number(raw);
-  if (Number.isNaN(value) || value < 0 || !Number.isInteger(value)) return null;
-  return value;
-}
+import { parseNonNegative, parsePercent, parseNonNegativeInt, type ActionResult, type ValidationErr } from '@/lib/admin/validation';
 
 export async function updateLaborRate(id: string, values: Record<string, string>): Promise<ActionResult> {
   if (!(await requireAdminSession())) return { error: 'Not authenticated.' };
@@ -59,10 +35,6 @@ interface SettingsOk {
   cmPercentOfTechHours: number;
   pmPercentOfTechHours: number;
   coordinatorPercentOfTechHours: number;
-}
-interface ValidationErr {
-  ok: false;
-  error: string;
 }
 
 function validateSettingsValues(values: Record<string, string>): SettingsOk | ValidationErr {

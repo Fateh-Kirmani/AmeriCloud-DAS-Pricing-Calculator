@@ -4,10 +4,7 @@ import { prisma } from '@/lib/db';
 import { Prisma, type MaterialCategory } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { requireAdminSession } from '@/lib/auth/adminAuth';
-
-interface ActionResult {
-  error?: string;
-}
+import type { ActionResult, ValidationErr } from '@/lib/admin/validation';
 
 const VALID_CATEGORIES: MaterialCategory[] = ['Consumable', 'DAS_Materials', 'BAT_Materials'];
 
@@ -21,10 +18,6 @@ interface MaterialOk {
   manufacturer: string | null;
   model: string | null;
   vendor: string | null;
-}
-interface ValidationErr {
-  ok: false;
-  error: string;
 }
 
 function validateMaterialValues(values: Record<string, string>): MaterialOk | ValidationErr {
