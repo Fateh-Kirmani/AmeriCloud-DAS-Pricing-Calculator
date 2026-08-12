@@ -34,6 +34,23 @@ describe('project rates admin actions (integration — requires a live, seeded l
     expect(untouchedB!.hourlyRate).not.toBe(999);
   });
 
+  it('rejects updating a labor rate with a mismatched projectId/id pair, leaving the row unchanged', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const rateA = await prisma.projectLaborRate.findUnique({
+      where: { projectId_role: { projectId: projectA, role: 'Technician' } },
+    });
+    const originalHourlyRate = rateA!.hourlyRate;
+
+    const result = await updateProjectLaborRate(projectB, rateA!.id, { hourlyRate: '500', rawWageRate: '400' });
+    expect(result.error).toMatch(/not found/);
+
+    const untouchedA = await prisma.projectLaborRate.findUnique({ where: { id: rateA!.id } });
+    expect(untouchedA!.hourlyRate).toBe(originalHourlyRate);
+  });
+
   it('rejects a negative hourly rate', async () => {
     const { id: projectId } = await createProject();
     projectIds.push(projectId);
@@ -65,6 +82,23 @@ describe('project rates admin actions (integration — requires a live, seeded l
 
     const untouchedB = await prisma.projectCrewSizeRow.findUnique({ where: { id: rowB!.id } });
     expect(untouchedB!.cmsNeeded).not.toBe(9);
+  });
+
+  it('rejects updating a crew-size row with a mismatched projectId/id pair, leaving the row unchanged', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const rowA = await prisma.projectCrewSizeRow.findUnique({
+      where: { projectId_technicianCount: { projectId: projectA, technicianCount: 4 } },
+    });
+    const originalCmsNeeded = rowA!.cmsNeeded;
+
+    const result = await updateProjectCrewSizeRow(projectB, rowA!.id, { cmsNeeded: '99' });
+    expect(result.error).toMatch(/not found/);
+
+    const untouchedA = await prisma.projectCrewSizeRow.findUnique({ where: { id: rowA!.id } });
+    expect(untouchedA!.cmsNeeded).toBe(originalCmsNeeded);
   });
 
   it('updates labor projection settings without affecting a different project', async () => {
