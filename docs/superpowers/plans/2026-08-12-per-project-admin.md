@@ -938,7 +938,8 @@ export async function deleteProjectLaborTask(projectId: string, id: string): Pro
     return { error: `Cannot delete "${target.key}" — it is referenced by the derived quantity formula of: ${names}.` };
   }
 
-  await prisma.projectLaborTask.deleteMany({ where: { id, projectId } });
+  const result = await prisma.projectLaborTask.deleteMany({ where: { id, projectId } });
+  if (result.count === 0) return { error: 'Task not found in this project.' };
   revalidatePath(`/project/${projectId}`, 'layout');
   return {};
 }
@@ -1737,7 +1738,8 @@ export async function updateProjectRental(projectId: string, id: string, values:
 }
 
 export async function deleteProjectRental(projectId: string, id: string): Promise<ActionResult> {
-  await prisma.projectRentalRate.deleteMany({ where: { id, projectId } });
+  const result = await prisma.projectRentalRate.deleteMany({ where: { id, projectId } });
+  if (result.count === 0) return { error: 'Rental not found in this project.' };
   revalidatePath(`/project/${projectId}`, 'layout');
   return {};
 }
@@ -1808,7 +1810,8 @@ export async function updateProjectSoftCost(projectId: string, id: string, value
 }
 
 export async function deleteProjectSoftCost(projectId: string, id: string): Promise<ActionResult> {
-  await prisma.projectSoftCostRate.deleteMany({ where: { id, projectId } });
+  const result = await prisma.projectSoftCostRate.deleteMany({ where: { id, projectId } });
+  if (result.count === 0) return { error: 'Soft cost not found in this project.' };
   revalidatePath(`/project/${projectId}`, 'layout');
   return {};
 }
