@@ -94,6 +94,25 @@ describe('project material admin actions (integration — requires a live, seede
     expect(untouchedB).toMatchObject({ type: 'T', unitCost: 1 });
   });
 
+  it('returns a not-found error when updating a mismatched project/id pair, and changes nothing', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const materialA = await prisma.projectMaterialItem.create({
+      data: { projectId: projectA, key: 'test-proj-material-update-mismatch', type: 'T', description: 'D', category: 'Consumable', unitCost: 1 },
+    });
+
+    const result = await updateProjectMaterial(projectB, materialA.id, {
+      key: 'test-proj-material-update-mismatch', type: 'Hacked', description: 'D',
+      category: 'Consumable', unitCost: '999', manufacturer: '', model: '', vendor: '',
+    });
+    expect(result.error).toMatch(/not found/);
+
+    const unchanged = await prisma.projectMaterialItem.findUnique({ where: { id: materialA.id } });
+    expect(unchanged).toMatchObject({ type: 'T', unitCost: 1 });
+  });
+
   it('deletes a material scoped to its own project', async () => {
     const { id: projectId } = await createProject();
     projectIds.push(projectId);
