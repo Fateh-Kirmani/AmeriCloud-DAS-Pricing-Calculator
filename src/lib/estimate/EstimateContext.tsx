@@ -45,7 +45,7 @@ const EMPTY_COVER_INFO: CoverInfo = {
   jobSiteAddress: '', projectOverview: '',
 };
 
-function buildBlankDraft(estimateDefaults: EstimateDefaultsData): PersistedDraft {
+export function buildBlankDraft(estimateDefaults: EstimateDefaultsData): PersistedDraft {
   return {
     coverInfo: EMPTY_COVER_INFO,
     materials: [],
@@ -63,6 +63,40 @@ function buildBlankDraft(estimateDefaults: EstimateDefaultsData): PersistedDraft
       marginTweak: 0,
       taxRate: estimateDefaults.taxRate,
     },
+  };
+}
+
+// Merges a persisted draft (loaded from Project.draftJson, an untyped Prisma Json column) over
+// the standard blank-draft defaults, so any missing/renamed/added field in an older stored draft
+// degrades to a safe default instead of surfacing as `undefined` deep inside the app. Deliberately
+// not exhaustive/schema-validated — just resilient enough that a shape change doesn't crash a page
+// that used to work. Array-valued fields (materials/loeTasks/sowTasks/passThroughs.*) come from the
+// loaded draft when present and default to `[]` otherwise; they are never element-wise merged.
+export function normalizeDraft(loaded: unknown, estimateDefaults: EstimateDefaultsData): PersistedDraft {
+  const blank = buildBlankDraft(estimateDefaults);
+  if (!loaded || typeof loaded !== 'object') return blank;
+  const raw = loaded as Record<string, unknown>;
+
+  const coverInfo = raw.coverInfo && typeof raw.coverInfo === 'object'
+    ? { ...blank.coverInfo, ...(raw.coverInfo as Partial<CoverInfo>) }
+    : blank.coverInfo;
+  const markups = raw.markups && typeof raw.markups === 'object'
+    ? { ...blank.markups, ...(raw.markups as Partial<MarkupInputs>) }
+    : blank.markups;
+  const passThroughs = raw.passThroughs && typeof raw.passThroughs === 'object'
+    ? { ...blank.passThroughs, ...(raw.passThroughs as Partial<PassThroughInput>) }
+    : blank.passThroughs;
+
+  return {
+    coverInfo,
+    materials: Array.isArray(raw.materials) ? (raw.materials as MaterialLineInput[]) : blank.materials,
+    contingencyPct: typeof raw.contingencyPct === 'number' ? raw.contingencyPct : blank.contingencyPct,
+    shippingHandling: typeof raw.shippingHandling === 'number' ? raw.shippingHandling : blank.shippingHandling,
+    loeTasks: Array.isArray(raw.loeTasks) ? (raw.loeTasks as LaborTaskLineInput[]) : blank.loeTasks,
+    sowTasks: Array.isArray(raw.sowTasks) ? (raw.sowTasks as LaborTaskLineInput[]) : blank.sowTasks,
+    technicianCount: typeof raw.technicianCount === 'number' ? raw.technicianCount : blank.technicianCount,
+    passThroughs,
+    markups,
   };
 }
 
@@ -119,6 +153,11 @@ export function EstimateProvider({
 
   const [lastSavedJson, setLastSavedJson] = useState(() => JSON.stringify(baseline));
   const pendingSaveRef = useRef<PendingSave | null>(null);
+  // Tracks the Promise of whichever save (timer-driven or flushSave-driven) is currently in
+  // flight, so flushSave() can await a save that's already running instead of assuming "nothing
+  // in pendingSaveRef" means "nothing to wait for" (pendingSaveRef stays populated with the
+  // original entry for the whole duration of an in-flight save — it's only cleared on success).
+  const inFlightSaveRef = useRef<Promise<void> | null>(null);
 
   const currentDraft: PersistedDraft = {
     coverInfo, materials, contingencyPct, shippingHandling, loeTasks, sowTasks,
@@ -144,9 +183,29 @@ export function EstimateProvider({
       return;
     }
     const timer = setTimeout(() => {
-      saveProjectDraft(projectId, currentDraft);
-      setLastSavedJson(draftJson);
-      pendingSaveRef.current = null;
+      // Captured so that, if a newer edit races ahead and repopulates pendingSaveRef with a
+      // later draft before this save resolves, we only ever clear the entry we actually own —
+      // never a newer pending entry that this save doesn't know about.
+      const pendingAtStart = pendingSaveRef.current;
+      const savePromise = saveProjectDraft(projectId, currentDraft)
+        .then(() => {
+          setLastSavedJson(draftJson);
+          if (pendingSaveRef.current === pendingAtStart) {
+            pendingSaveRef.current = null;
+          }
+        })
+        .catch((error) => {
+          console.error('Autosave failed:', error);
+          // Deliberately do NOT clear pendingSaveRef or update lastSavedJson on failure —
+          // isDirty stays true, and a later flushSave() (or the next edit's debounce cycle)
+          // will retry with the same draft.
+        })
+        .finally(() => {
+          if (inFlightSaveRef.current === savePromise) {
+            inFlightSaveRef.current = null;
+          }
+        });
+      inFlightSaveRef.current = savePromise;
     }, PERSIST_DEBOUNCE_MS);
     pendingSaveRef.current = { draft: currentDraft, draftJson, timer };
     return () => clearTimeout(timer);
@@ -169,13 +228,56 @@ export function EstimateProvider({
   }, [isDirty]);
 
   async function flushSave(): Promise<void> {
+    // If a save is already running (started by the debounce timer, or by an earlier overlapping
+    // flushSave() call), wait for it to settle first rather than firing a second concurrent save
+    // of the same/overlapping draft. This promise never rejects itself (its own .catch swallows
+    // failures) — pendingSaveRef is what tells us afterward whether it actually succeeded.
+    if (inFlightSaveRef.current) {
+      await inFlightSaveRef.current;
+    }
     const pending = pendingSaveRef.current;
     if (!pending) return;
     clearTimeout(pending.timer);
     pendingSaveRef.current = null;
-    await saveProjectDraft(projectId, pending.draft);
-    setLastSavedJson(pending.draftJson);
+    try {
+      await saveProjectDraft(projectId, pending.draft);
+      setLastSavedJson(pending.draftJson);
+    } catch (error) {
+      console.error('flushSave failed:', error);
+      // Restore the pending entry so a later flushSave() call (or the next edit's debounce
+      // cycle, which will see isDirty still true) retries persisting this draft.
+      pendingSaveRef.current = pending;
+      throw error;
+    }
   }
+
+  // flushSave is a plain function recreated every render (it closes over per-render state like
+  // pending/currentDraft indirectly via the refs), so the best-effort-flush effect below keeps a
+  // ref to the latest version rather than depending on it directly and re-subscribing every render.
+  const flushSaveRef = useRef(flushSave);
+  flushSaveRef.current = flushSave;
+
+  // Best-effort safety net for the case the Sidebar's "All Projects" button doesn't cover: the
+  // browser Back button, or any other client-side navigation away from a project page, which just
+  // lets the debounce timer's cleanup clear the timer with no flush. Neither of these listeners is
+  // a guarantee (the tab can still be killed instantly), just a best-effort reduction of the data
+  // lost from up to one ~500ms debounce window.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        flushSaveRef.current().catch((error) => {
+          console.error('Failed to flush save on visibility change:', error);
+        });
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      flushSaveRef.current().catch((error) => {
+        console.error('Failed to flush save on unmount:', error);
+      });
+    };
+  }, []);
 
   const input: EstimateInput = useMemo(
     () => ({ materials, contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs, markups }),

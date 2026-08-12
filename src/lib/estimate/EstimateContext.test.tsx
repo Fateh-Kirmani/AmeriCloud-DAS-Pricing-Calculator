@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { EstimateProvider, useEstimate, type PersistedDraft } from './EstimateContext';
+import { EstimateProvider, useEstimate, buildBlankDraft, normalizeDraft, type PersistedDraft } from './EstimateContext';
 import { saveProjectDraft } from '@/lib/project/saveProjectDraft';
 import type { ReferenceData } from '@/lib/calc';
 
@@ -47,6 +47,10 @@ function TestConsumer() {
       <button onClick={() => setCoverInfo({ client: 'Acme Corp' })}>Set Client</button>
       <button onClick={() => setCoverInfo({ client: '' })}>Clear Client</button>
       <button onClick={() => flushSave()}>Flush</button>
+      {/* Swallows the rejection so a deliberately-failing flushSave() in a test doesn't surface
+          as an unhandled promise rejection — the test asserts on saveProjectDraft call counts
+          and the beforeunload/isDirty side effects instead. */}
+      <button onClick={() => { flushSave().catch(() => {}); }}>Flush (ignore errors)</button>
     </div>
   );
 }
@@ -239,5 +243,201 @@ describe('EstimateProvider / useEstimate', () => {
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  // Advances the real microtask queue several rounds, independent of vi.useFakeTimers() (which
+  // only fakes macrotasks like setTimeout — native Promise resolution still runs on the real
+  // microtask queue). Used below to let a resolved/rejected mocked save's .then/.catch/.finally
+  // chain fully settle before asserting on its effects.
+  async function flushMicrotasks(rounds = 10) {
+    for (let i = 0; i < rounds; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  it('does not mark the draft as saved when the debounced autosave fails, and leaves it retryable', async () => {
+    vi.useFakeTimers();
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.mocked(saveProjectDraft).mockRejectedValueOnce(new Error('network error'));
+
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      await act(() => flushMicrotasks());
+
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Autosave failed:', expect.any(Error));
+
+      // The failed save must never be treated as successful: isDirty stays true.
+      const firstEvent = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(firstEvent);
+      expect(firstEvent.defaultPrevented).toBe(true);
+
+      // A later flushSave() retries the same still-pending draft and this time succeeds.
+      vi.mocked(saveProjectDraft).mockResolvedValueOnce(undefined);
+      await act(async () => {
+        fireEvent.click(screen.getByText('Flush (ignore errors)'));
+      });
+
+      expect(saveProjectDraft).toHaveBeenCalledTimes(2);
+      const secondEvent = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(secondEvent);
+      expect(secondEvent.defaultPrevented).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('propagates a flushSave() failure to the caller instead of swallowing it, while keeping the draft pending', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      vi.mocked(saveProjectDraft).mockRejectedValueOnce(new Error('db unreachable'));
+
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+
+      await act(async () => {
+        fireEvent.click(screen.getByText('Flush (ignore errors)'));
+        await flushMicrotasks();
+      });
+
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+      const midEvent = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(midEvent);
+      expect(midEvent.defaultPrevented).toBe(true); // still dirty — the failure wasn't treated as a save
+
+      // Retrying (a plain flushSave(), no error swallowing needed this time) succeeds.
+      vi.mocked(saveProjectDraft).mockResolvedValueOnce(undefined);
+      await act(async () => {
+        fireEvent.click(screen.getByText('Flush'));
+      });
+
+      expect(saveProjectDraft).toHaveBeenCalledTimes(2);
+      const finalEvent = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(finalEvent);
+      expect(finalEvent.defaultPrevented).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('flushSave awaits an already in-flight (timer-driven) save instead of firing a duplicate', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSave: (() => void) | undefined;
+      vi.mocked(saveProjectDraft).mockImplementationOnce(
+        () => new Promise<void>((resolve) => { resolveSave = resolve; }),
+      );
+
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+      await act(async () => {
+        vi.advanceTimersByTime(500); // the debounce timer fires; the mocked save is now in flight and unresolved
+      });
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+
+      // flushSave() is called while that save is still in flight. It must await it rather than
+      // starting a second, overlapping save of the same draft.
+      fireEvent.click(screen.getByText('Flush'));
+
+      resolveSave!();
+      await act(() => flushMicrotasks());
+
+      expect(saveProjectDraft).toHaveBeenCalledTimes(1);
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('buildBlankDraft / normalizeDraft', () => {
+  it('normalizeDraft returns the standard blank draft when there is nothing persisted yet', () => {
+    expect(normalizeDraft(null, estimateDefaults)).toEqual(buildBlankDraft(estimateDefaults));
+    expect(normalizeDraft(undefined, estimateDefaults)).toEqual(buildBlankDraft(estimateDefaults));
+  });
+
+  it('fills in missing top-level and nested fields from the blank-draft defaults', () => {
+    const loaded = {
+      coverInfo: { client: 'Acme Corp' }, // missing every other CoverInfo field
+      materials: [{ key: 'bom-3', quantity: 5 }],
+      // contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs,
+      // markups are all entirely absent, simulating an older/renamed draft shape.
+    };
+
+    const normalized = normalizeDraft(loaded, estimateDefaults);
+    const blank = buildBlankDraft(estimateDefaults);
+
+    expect(normalized.coverInfo).toEqual({ ...blank.coverInfo, client: 'Acme Corp' });
+    expect(normalized.materials).toEqual([{ key: 'bom-3', quantity: 5 }]);
+    expect(normalized.contingencyPct).toBe(blank.contingencyPct);
+    expect(normalized.loeTasks).toEqual([]);
+    expect(normalized.sowTasks).toEqual([]);
+    expect(normalized.technicianCount).toBe(blank.technicianCount);
+    expect(normalized.passThroughs).toEqual(blank.passThroughs);
+    expect(normalized.markups).toEqual(blank.markups);
+  });
+
+  it('overrides (not merges) array-valued passThrough fields that are present, and defaults the rest', () => {
+    const loaded = {
+      passThroughs: {
+        lodging: [{ role: 'Technician', nights: 3 }],
+        // perDiem, travel, airfare, rentals, softCosts absent — should default to [].
+      },
+    };
+
+    const normalized = normalizeDraft(loaded, estimateDefaults);
+
+    expect(normalized.passThroughs.lodging).toEqual([{ role: 'Technician', nights: 3 }]);
+    expect(normalized.passThroughs.perDiem).toEqual([]);
+    expect(normalized.passThroughs.travel).toEqual([]);
+    expect(normalized.passThroughs.airfare).toEqual([]);
+    expect(normalized.passThroughs.rentals).toEqual([]);
+    expect(normalized.passThroughs.softCosts).toEqual([]);
+  });
+
+  it('preserves a fully-populated draft unchanged', () => {
+    const full: PersistedDraft = {
+      coverInfo: {
+        client: 'Restored Corp', project: 'P', rfpDate: '', bidDueDate: '', estimator: '',
+        contactName: '', contactPhone: '', contactEmail: '', customerType: '',
+        jobSiteAddress: '', projectOverview: '',
+      },
+      materials: [{ key: 'bom-3', quantity: 3 }],
+      contingencyPct: 0.15,
+      shippingHandling: 250,
+      loeTasks: [],
+      sowTasks: [],
+      technicianCount: 6,
+      passThroughs: { perDiem: [], lodging: [], travel: [], airfare: [], rentals: [], softCosts: [] },
+      markups: {
+        laborMarkupPct: 0.3, passThroughMarkupPct: 0.3, materialMarkupPct: 0.3,
+        corporateMarkupPct: 0.05, marginTweak: 100, taxRate: 0.0825,
+      },
+    };
+
+    expect(normalizeDraft(full, estimateDefaults)).toEqual(full);
   });
 });
