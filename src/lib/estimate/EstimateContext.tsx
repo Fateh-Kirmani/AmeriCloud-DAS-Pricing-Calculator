@@ -12,7 +12,7 @@ import { upsertLine } from './upsertLine';
 const DRAFT_STORAGE_KEY = 'das-estimate-draft-v1';
 const PERSIST_DEBOUNCE_MS = 500;
 
-interface PersistedDraft {
+export interface PersistedDraft {
   coverInfo: CoverInfo;
   materials: MaterialLineInput[];
   contingencyPct: number;
