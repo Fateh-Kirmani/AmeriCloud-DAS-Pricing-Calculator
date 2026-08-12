@@ -2,10 +2,17 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { LaborProjectionSettings } from '@prisma/client';
-import { updateLaborProjectionSettings } from './actions';
 
-function toDisplayValues(settings: LaborProjectionSettings): Record<string, string> {
+interface SettingsShape {
+  hoursPerManDay: number;
+  hoursPerManWeek: number;
+  stagingMaterialMultiplier: number;
+  cmPercentOfTechHours: number;
+  pmPercentOfTechHours: number;
+  coordinatorPercentOfTechHours: number;
+}
+
+function toDisplayValues(settings: SettingsShape): Record<string, string> {
   return {
     hoursPerManDay: String(settings.hoursPerManDay),
     hoursPerManWeek: String(settings.hoursPerManWeek),
@@ -25,7 +32,13 @@ const FIELDS: { key: string; label: string; suffix: string }[] = [
   { key: 'coordinatorPercentOfTechHours', label: 'Project Coordinator % of Tech Hours', suffix: '%' },
 ];
 
-export function LaborProjectionSettingsForm({ settings }: { settings: LaborProjectionSettings }) {
+export function LaborProjectionSettingsForm({
+  settings,
+  onSave,
+}: {
+  settings: SettingsShape;
+  onSave: (values: Record<string, string>) => Promise<{ error?: string }>;
+}) {
   const router = useRouter();
   const [values, setValues] = useState<Record<string, string>>(toDisplayValues(settings));
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +47,7 @@ export function LaborProjectionSettingsForm({ settings }: { settings: LaborProje
   async function handleSave() {
     setPending(true);
     setError(null);
-    const result = await updateLaborProjectionSettings(values);
+    const result = await onSave(values);
     setPending(false);
     if (result.error) {
       setError(result.error);
