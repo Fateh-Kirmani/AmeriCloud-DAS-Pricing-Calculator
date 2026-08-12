@@ -2,26 +2,28 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
-  FileText, Package, HardHat, Receipt, BarChart3, Settings, ChevronLeft, ChevronRight,
+  FileText, Package, HardHat, Receipt, BarChart3, Folder, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
-
-const NAV_ITEMS = [
-  { href: '/', label: 'Cover Info', icon: FileText },
-  { href: '/materials', label: 'Materials', icon: Package },
-  { href: '/labor', label: 'Labor', icon: HardHat },
-  { href: '/pass-throughs', label: 'Pass Throughs', icon: Receipt },
-  { href: '/summary', label: 'Executive Summary', icon: BarChart3 },
-  { href: '/admin', label: 'Admin', icon: Settings },
-];
+import { useEstimate } from '@/lib/estimate/EstimateContext';
 
 const NARROW_VIEWPORT_QUERY = '(max-width: 768px)';
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { projectId, flushSave } = useEstimate();
+
+  const navItems = [
+    { href: `/project/${projectId}`, label: 'Cover Info', icon: FileText },
+    { href: `/project/${projectId}/materials`, label: 'Materials', icon: Package },
+    { href: `/project/${projectId}/labor`, label: 'Labor', icon: HardHat },
+    { href: `/project/${projectId}/pass-throughs`, label: 'Pass Throughs', icon: Receipt },
+    { href: `/project/${projectId}/summary`, label: 'Executive Summary', icon: BarChart3 },
+  ];
 
   // Auto-collapse to reclaim width on tablet/narrow viewports. Only ever collapses
   // automatically (on mount, and when resizing into the narrow range) — it never
@@ -35,6 +37,11 @@ export function Sidebar() {
     mql.addEventListener('change', handleChange);
     return () => mql.removeEventListener('change', handleChange);
   }, []);
+
+  async function handleAllProjectsClick() {
+    await flushSave();
+    router.push('/projects');
+  }
 
   return (
     <nav
@@ -56,8 +63,10 @@ export function Sidebar() {
         )}
       </button>
       <ul className="flex-1 py-2">
-        {NAV_ITEMS.map((item) => {
-          const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+        {navItems.map((item) => {
+          const active = item.href === `/project/${projectId}`
+            ? pathname === item.href
+            : pathname.startsWith(item.href);
           const Icon = item.icon;
           return (
             <li key={item.href}>
@@ -77,6 +86,22 @@ export function Sidebar() {
             </li>
           );
         })}
+        <li>
+          <button
+            type="button"
+            onClick={handleAllProjectsClick}
+            className={cn(
+              'flex items-center gap-3 px-4 py-3 text-sm font-body transition-colors w-full text-left',
+              collapsed && 'justify-center px-0',
+              'text-white/70 hover:bg-navy-2 hover:text-white',
+            )}
+            title={collapsed ? 'All Projects' : undefined}
+            aria-label={collapsed ? 'All Projects' : undefined}
+          >
+            <Folder className="w-5 h-5 shrink-0" aria-hidden="true" />
+            {!collapsed && <span>All Projects</span>}
+          </button>
+        </li>
       </ul>
     </nav>
   );
