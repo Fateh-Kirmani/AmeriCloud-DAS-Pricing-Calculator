@@ -139,4 +139,45 @@ describe('project labor task admin actions (integration — requires a live, see
     const result = await deleteProjectLaborTask(projectA, baseInA.id);
     expect(result.error).toBeUndefined();
   });
+
+  it('rejects updating a task using a mismatched (projectId, id) pair and leaves it unchanged', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const created = await prisma.projectLaborTask.create({
+      data: {
+        projectId: projectA, key: 'test-proj-task-mismatch-update', sheet: 'LOE', category: 'Original', name: 'Original',
+        minutesPerUnit: 10, unit: 'Each', laborRole: 'Technician',
+      },
+    });
+
+    const result = await updateProjectLaborTask(projectB, created.id, {
+      key: 'test-proj-task-mismatch-update', sheet: 'SOW', category: 'Hacked', name: 'Hacked',
+      minutesPerUnit: '999', unit: 'Each', laborRole: 'RF_Engineer', includedInSubtotal: 'true',
+    });
+    expect(result.error).toMatch(/not found/);
+
+    const unchanged = await prisma.projectLaborTask.findUnique({ where: { id: created.id } });
+    expect(unchanged).toMatchObject({ category: 'Original', name: 'Original', minutesPerUnit: 10 });
+  });
+
+  it('rejects deleting a task using a mismatched (projectId, id) pair and leaves it intact', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const created = await prisma.projectLaborTask.create({
+      data: {
+        projectId: projectA, key: 'test-proj-task-mismatch-delete', sheet: 'LOE', category: 'C', name: 'N',
+        minutesPerUnit: 10, unit: 'Each', laborRole: 'Technician',
+      },
+    });
+
+    const result = await deleteProjectLaborTask(projectB, created.id);
+    expect(result.error).toMatch(/not found/);
+
+    const stillThere = await prisma.projectLaborTask.findUnique({ where: { id: created.id } });
+    expect(stillThere).not.toBeNull();
+  });
 });
