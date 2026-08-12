@@ -1,10 +1,10 @@
 // src/lib/data/loadProjectReferenceData.ts
 import { prisma } from '@/lib/db';
 import type { PassThroughRateKind } from '@prisma/client';
-import type { MaterialItem, ReferenceData } from '@/lib/calc';
+import type { ReferenceData } from '@/lib/calc';
 import {
-  CATEGORY_FROM_DB, mapRole, mapRoleRate, sortByRole, parseDerivedFrom,
-  type EstimateDefaultsData,
+  buildReferenceData, buildEstimateDefaults,
+  type EstimateDefaultsData, type ReferenceDataRawRows,
 } from './loadReferenceData';
 
 export async function loadProjectReferenceData(projectId: string): Promise<ReferenceData> {
@@ -24,76 +24,29 @@ export async function loadProjectReferenceData(projectId: string): Promise<Refer
     prisma.projectSoftCostRate.findMany({ where: { projectId } }),
   ]);
 
-  if (!settingsDb) {
-    throw new Error(`ProjectLaborProjectionSettings row not found for project "${projectId}".`);
+  try {
+    return buildReferenceData({
+      materialItemsDb,
+      laborTasksDb,
+      laborRatesDb,
+      crewSizeTableDb,
+      settingsDb,
+      perDiemDb,
+      lodgingDb,
+      airfareDb,
+      rentalsDb,
+      softCostsDb,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'LaborProjectionSettings row not found.') {
+      throw new Error(`ProjectLaborProjectionSettings row not found for project "${projectId}".`);
+    }
+    throw error;
   }
-
-  const materialItems: MaterialItem[] = materialItemsDb.map((m) => ({
-    key: m.key,
-    type: m.type,
-    manufacturer: m.manufacturer,
-    model: m.model,
-    description: m.description,
-    vendor: m.vendor,
-    category: CATEGORY_FROM_DB[m.category],
-    unitCost: m.unitCost,
-  }));
-
-  const laborTasks = laborTasksDb.map((t) => ({
-    key: t.key,
-    sheet: t.sheet,
-    category: t.category,
-    name: t.name,
-    minutesPerUnit: t.minutesPerUnit,
-    unit: t.unit,
-    laborRole: mapRole(t.laborRole),
-    includedInSubtotal: t.includedInSubtotal,
-    derivedFrom: parseDerivedFrom(t.derivedFromJson, t.key),
-  }));
-
-  const laborRates = sortByRole(laborRatesDb.map((r) => ({
-    role: mapRole(r.role),
-    hourlyRate: r.hourlyRate,
-    rawWageRate: r.rawWageRate,
-  })));
-
-  const crewSizeTable = crewSizeTableDb.map((r) => ({
-    technicianCount: r.technicianCount,
-    cmsNeeded: r.cmsNeeded,
-  }));
-
-  return {
-    materialItems,
-    laborTasks,
-    laborRates,
-    crewSizeTable,
-    laborProjectionSettings: {
-      hoursPerManDay: settingsDb.hoursPerManDay,
-      hoursPerManWeek: settingsDb.hoursPerManWeek,
-      stagingMaterialMultiplier: settingsDb.stagingMaterialMultiplier,
-      cmPercentOfTechHours: settingsDb.cmPercentOfTechHours,
-      pmPercentOfTechHours: settingsDb.pmPercentOfTechHours,
-      coordinatorPercentOfTechHours: settingsDb.coordinatorPercentOfTechHours,
-    },
-    passThroughRates: {
-      perDiemRateByRole: sortByRole(mapRoleRate(perDiemDb)),
-      lodgingRateByRole: sortByRole(mapRoleRate(lodgingDb)),
-      airfareCostByRole: sortByRole(airfareDb.map((r) => ({ role: mapRole(r.role), cost: r.amount }))),
-      rentals: rentalsDb.map((r) => ({ key: r.key, name: r.name, rate: r.rate, unit: r.unit })),
-      softCosts: softCostsDb.map((r) => ({ key: r.key, name: r.name, fee: r.fee })),
-    },
-  };
 }
 
 export async function loadProjectEstimateDefaults(projectId: string): Promise<EstimateDefaultsData> {
   const row = await prisma.projectEstimateDefaults.findUnique({ where: { projectId } });
   if (!row) throw new Error(`ProjectEstimateDefaults row not found for project "${projectId}".`);
-  return {
-    laborMarkupPct: row.laborMarkupPct,
-    passThroughMarkupPct: row.passThroughMarkupPct,
-    materialMarkupPct: row.materialMarkupPct,
-    corporateMarkupPct: row.corporateMarkupPct,
-    taxRate: row.taxRate,
-    contingencyPct: row.contingencyPct,
-  };
+  return buildEstimateDefaults(row);
 }

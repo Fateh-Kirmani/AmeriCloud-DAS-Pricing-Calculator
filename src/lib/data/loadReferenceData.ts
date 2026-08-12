@@ -76,25 +76,24 @@ export function sortByRole<T extends { role: LaborRole }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role));
 }
 
-export async function loadReferenceData(): Promise<ReferenceData> {
-  const [
-    materialItemsDb, laborTasksDb, laborRatesDb, crewSizeTableDb, settingsDb,
-    perDiemDb, lodgingDb, airfareDb, rentalsDb, softCostsDb,
-  ] = await Promise.all([
-    prisma.materialItem.findMany(),
-    prisma.laborTask.findMany(),
-    prisma.laborRate.findMany(),
-    prisma.crewSizeRow.findMany(),
-    prisma.laborProjectionSettings.findUnique({ where: { id: 'singleton' } }),
-    prisma.passThroughRoleRate.findMany({ where: { kind: 'PerDiem' as PassThroughRateKind } }),
-    prisma.passThroughRoleRate.findMany({ where: { kind: 'Lodging' as PassThroughRateKind } }),
-    prisma.passThroughRoleRate.findMany({ where: { kind: 'Airfare' as PassThroughRateKind } }),
-    prisma.rentalRate.findMany(),
-    prisma.softCostRate.findMany(),
-  ]);
+export interface ReferenceDataRawRows {
+  materialItemsDb: Array<{ key: string; type: string; manufacturer: string | null; model: string | null; description: string; vendor: string | null; category: MaterialCategory; unitCost: number }>;
+  laborTasksDb: Array<{ key: string; sheet: string; category: string; name: string; minutesPerUnit: number; unit: string; laborRole: LaborRoleName; includedInSubtotal: boolean; derivedFromJson: unknown }>;
+  laborRatesDb: Array<{ role: LaborRoleName; hourlyRate: number; rawWageRate: number }>;
+  crewSizeTableDb: Array<{ technicianCount: number; cmsNeeded: number }>;
+  settingsDb: { hoursPerManDay: number; hoursPerManWeek: number; stagingMaterialMultiplier: number; cmPercentOfTechHours: number; pmPercentOfTechHours: number; coordinatorPercentOfTechHours: number } | null;
+  perDiemDb: Array<{ role: LaborRoleName; amount: number }>;
+  lodgingDb: Array<{ role: LaborRoleName; amount: number }>;
+  airfareDb: Array<{ role: LaborRoleName; amount: number }>;
+  rentalsDb: Array<{ key: string; name: string; rate: number; unit: string }>;
+  softCostsDb: Array<{ key: string; name: string; fee: number }>;
+}
+
+export function buildReferenceData(rows: ReferenceDataRawRows): ReferenceData {
+  const { materialItemsDb, laborTasksDb, laborRatesDb, crewSizeTableDb, settingsDb, perDiemDb, lodgingDb, airfareDb, rentalsDb, softCostsDb } = rows;
 
   if (!settingsDb) {
-    throw new Error('LaborProjectionSettings singleton row not found — run `npm run seed`.');
+    throw new Error('LaborProjectionSettings row not found.');
   }
 
   const materialItems: MaterialItem[] = materialItemsDb.map((m) => ({
@@ -110,7 +109,7 @@ export async function loadReferenceData(): Promise<ReferenceData> {
 
   const laborTasks = laborTasksDb.map((t) => ({
     key: t.key,
-    sheet: t.sheet,
+    sheet: t.sheet as "LOE" | "SOW",
     category: t.category,
     name: t.name,
     minutesPerUnit: t.minutesPerUnit,
@@ -154,9 +153,7 @@ export async function loadReferenceData(): Promise<ReferenceData> {
   };
 }
 
-export async function loadEstimateDefaults(): Promise<EstimateDefaultsData> {
-  const row = await prisma.estimateDefaults.findUnique({ where: { id: 'singleton' } });
-  if (!row) throw new Error('EstimateDefaults singleton row not found — run `npm run seed`.');
+export function buildEstimateDefaults(row: { laborMarkupPct: number; passThroughMarkupPct: number; materialMarkupPct: number; corporateMarkupPct: number; taxRate: number; contingencyPct: number }): EstimateDefaultsData {
   return {
     laborMarkupPct: row.laborMarkupPct,
     passThroughMarkupPct: row.passThroughMarkupPct,
@@ -165,4 +162,48 @@ export async function loadEstimateDefaults(): Promise<EstimateDefaultsData> {
     taxRate: row.taxRate,
     contingencyPct: row.contingencyPct,
   };
+}
+
+export async function loadReferenceData(): Promise<ReferenceData> {
+  const [
+    materialItemsDb, laborTasksDb, laborRatesDb, crewSizeTableDb, settingsDb,
+    perDiemDb, lodgingDb, airfareDb, rentalsDb, softCostsDb,
+  ] = await Promise.all([
+    prisma.materialItem.findMany(),
+    prisma.laborTask.findMany(),
+    prisma.laborRate.findMany(),
+    prisma.crewSizeRow.findMany(),
+    prisma.laborProjectionSettings.findUnique({ where: { id: 'singleton' } }),
+    prisma.passThroughRoleRate.findMany({ where: { kind: 'PerDiem' as PassThroughRateKind } }),
+    prisma.passThroughRoleRate.findMany({ where: { kind: 'Lodging' as PassThroughRateKind } }),
+    prisma.passThroughRoleRate.findMany({ where: { kind: 'Airfare' as PassThroughRateKind } }),
+    prisma.rentalRate.findMany(),
+    prisma.softCostRate.findMany(),
+  ]);
+
+  try {
+    return buildReferenceData({
+      materialItemsDb,
+      laborTasksDb,
+      laborRatesDb,
+      crewSizeTableDb,
+      settingsDb,
+      perDiemDb,
+      lodgingDb,
+      airfareDb,
+      rentalsDb,
+      softCostsDb,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'LaborProjectionSettings row not found.') {
+      throw new Error('LaborProjectionSettings singleton row not found — run `npm run seed`.');
+    }
+    throw error;
+  }
+}
+
+export async function loadEstimateDefaults(): Promise<EstimateDefaultsData> {
+  const row = await prisma.estimateDefaults.findUnique({ where: { id: 'singleton' } });
+  if (!row) throw new Error('EstimateDefaults singleton row not found — run `npm run seed`.');
+  return buildEstimateDefaults(row);
 }
