@@ -116,4 +116,27 @@ describe('project labor task admin actions (integration — requires a live, see
     const result = await deleteProjectLaborTask(projectId, base.id);
     expect(result.error).toMatch(/referenced by the derived quantity formula/);
   });
+
+  it('does not block deleting a task when a different project has a same-named-key reference', async () => {
+    const { id: projectA } = await createProject();
+    const { id: projectB } = await createProject();
+    projectIds.push(projectA, projectB);
+
+    const baseInA = await prisma.projectLaborTask.create({
+      data: {
+        projectId: projectA, key: 'test-proj-task-base-cross', sheet: 'LOE', category: 'C', name: 'Base',
+        minutesPerUnit: 10, unit: 'Each', laborRole: 'Technician',
+      },
+    });
+    await prisma.projectLaborTask.create({
+      data: {
+        projectId: projectB, key: 'test-proj-task-derived-cross', sheet: 'LOE', category: 'C', name: 'Derived',
+        minutesPerUnit: 10, unit: 'Each', laborRole: 'Technician',
+        derivedFromJson: { terms: [{ key: 'test-proj-task-base-cross', coeff: 1 }], divisor: 1 },
+      },
+    });
+
+    const result = await deleteProjectLaborTask(projectA, baseInA.id);
+    expect(result.error).toBeUndefined();
+  });
 });
