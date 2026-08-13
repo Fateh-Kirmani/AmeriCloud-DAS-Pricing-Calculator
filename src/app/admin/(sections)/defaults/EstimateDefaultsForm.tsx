@@ -2,10 +2,17 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { EstimateDefaults } from '@prisma/client';
-import { updateEstimateDefaults } from './actions';
 
-function toDisplayValues(defaults: EstimateDefaults): Record<string, string> {
+interface DefaultsShape {
+  laborMarkupPct: number;
+  passThroughMarkupPct: number;
+  materialMarkupPct: number;
+  corporateMarkupPct: number;
+  taxRate: number;
+  contingencyPct: number;
+}
+
+function toDisplayValues(defaults: DefaultsShape): Record<string, string> {
   return {
     laborMarkupPct: String(defaults.laborMarkupPct * 100),
     passThroughMarkupPct: String(defaults.passThroughMarkupPct * 100),
@@ -25,7 +32,13 @@ const FIELDS: { key: string; label: string }[] = [
   { key: 'contingencyPct', label: 'Contingency %' },
 ];
 
-export function EstimateDefaultsForm({ defaults }: { defaults: EstimateDefaults }) {
+export function EstimateDefaultsForm({
+  defaults,
+  onSave,
+}: {
+  defaults: DefaultsShape;
+  onSave: (values: Record<string, string>) => Promise<{ error?: string }>;
+}) {
   const router = useRouter();
   const [values, setValues] = useState<Record<string, string>>(toDisplayValues(defaults));
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +47,7 @@ export function EstimateDefaultsForm({ defaults }: { defaults: EstimateDefaults 
   async function handleSave() {
     setPending(true);
     setError(null);
-    const result = await updateEstimateDefaults(values);
+    const result = await onSave(values);
     setPending(false);
     if (result.error) {
       setError(result.error);
