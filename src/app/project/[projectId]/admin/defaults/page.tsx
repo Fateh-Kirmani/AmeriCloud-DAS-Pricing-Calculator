@@ -10,7 +10,7 @@ export default async function ProjectDefaultsAdminPage({ params }: { params: { p
       <h1 className="font-display text-3xl font-bold tracking-tight text-navy">Estimate Defaults</h1>
       <EstimateDefaultsForm
         defaults={defaults}
-        onSave={(values) => updateProjectEstimateDefaults(projectId, values)}
+        onSave={updateProjectEstimateDefaults.bind(null, projectId)}
       />
     </div>
   );

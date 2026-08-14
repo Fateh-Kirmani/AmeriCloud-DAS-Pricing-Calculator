@@ -19,7 +19,7 @@ export default async function ProjectRatesAdminPage({ params }: { params: { proj
       <CrewSizeSection projectId={projectId} rows={crewSizeRows} />
       <LaborProjectionSettingsForm
         settings={settings}
-        onSave={(values) => updateProjectLaborProjectionSettings(projectId, values)}
+        onSave={updateProjectLaborProjectionSettings.bind(null, projectId)}
       />
     </div>
   );
