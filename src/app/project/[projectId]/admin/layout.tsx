@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { prisma } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,13 +12,16 @@ const ADMIN_NAV_ITEMS = (projectId: string) => [
   { href: `/project/${projectId}/admin/defaults`, label: 'Defaults' },
 ];
 
-export default function ProjectAdminLayout({
+export default async function ProjectAdminLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
   params: { projectId: string };
 }) {
+  const project = await prisma.project.findUnique({ where: { id: params.projectId } });
+  if (!project) notFound();
+
   const navItems = ADMIN_NAV_ITEMS(params.projectId);
 
   return (
