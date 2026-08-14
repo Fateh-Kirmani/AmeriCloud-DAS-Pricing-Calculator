@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/db';
+import type { Prisma } from '@prisma/client';
 import { revalidatePath } from 'next/cache';
 import { parseLabeledPercent, type ActionResult, type ValidationErr } from '@/lib/admin/validation';
 
@@ -32,21 +33,58 @@ function validateDefaultsValues(values: Record<string, string>): DefaultsOk | Va
   };
 }
 
-export async function updateProjectEstimateDefaults(projectId: string, values: Record<string, string>): Promise<ActionResult> {
-  const parsed = validateDefaultsValues(values);
-  if (!parsed.ok) return { error: parsed.error };
-
-  await prisma.projectEstimateDefaults.update({
-    where: { projectId },
-    data: {
+// Once a project has a saved draft, EstimateContext's normalizeDraft() merges the draft's own
+// copy of these six fields OVER fresh values loaded from ProjectEstimateDefaults — so without
+// this write-through, editing them here would have no visible effect on an existing project (the
+// draft's stale copy always wins). A brand-new project has no draftJson yet and picks up fresh
+// defaults the first time the estimator builds a blank draft, so there's nothing to write through.
+function withUpdatedDefaults(draftJson: Prisma.JsonValue, parsed: DefaultsOk): Prisma.InputJsonValue {
+  const draft = draftJson as Record<string, unknown>;
+  const markups = draft.markups && typeof draft.markups === 'object'
+    ? (draft.markups as Record<string, unknown>)
+    : {};
+  return {
+    ...draft,
+    contingencyPct: parsed.contingencyPct,
+    markups: {
+      ...markups,
       laborMarkupPct: parsed.laborMarkupPct,
       passThroughMarkupPct: parsed.passThroughMarkupPct,
       materialMarkupPct: parsed.materialMarkupPct,
       corporateMarkupPct: parsed.corporateMarkupPct,
       taxRate: parsed.taxRate,
-      contingencyPct: parsed.contingencyPct,
     },
-  });
+  } as Prisma.InputJsonValue;
+}
+
+export async function updateProjectEstimateDefaults(projectId: string, values: Record<string, string>): Promise<ActionResult> {
+  const parsed = validateDefaultsValues(values);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const project = await prisma.project.findUnique({ where: { id: projectId }, select: { draftJson: true } });
+  if (!project) return { error: 'Project not found.' };
+
+  const hasDraft = project.draftJson !== null && typeof project.draftJson === 'object';
+
+  await prisma.$transaction([
+    prisma.projectEstimateDefaults.update({
+      where: { projectId },
+      data: {
+        laborMarkupPct: parsed.laborMarkupPct,
+        passThroughMarkupPct: parsed.passThroughMarkupPct,
+        materialMarkupPct: parsed.materialMarkupPct,
+        corporateMarkupPct: parsed.corporateMarkupPct,
+        taxRate: parsed.taxRate,
+        contingencyPct: parsed.contingencyPct,
+      },
+    }),
+    ...(hasDraft
+      ? [prisma.project.update({
+        where: { id: projectId },
+        data: { draftJson: withUpdatedDefaults(project.draftJson as Prisma.JsonValue, parsed) },
+      })]
+      : []),
+  ]);
   revalidatePath(`/project/${projectId}`, 'layout');
   return {};
 }
