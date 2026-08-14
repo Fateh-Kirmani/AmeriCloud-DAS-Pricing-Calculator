@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  FileText, Package, HardHat, Receipt, BarChart3, Folder, ChevronLeft, ChevronRight,
+  FileText, Package, HardHat, Receipt, BarChart3, Settings, Folder, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { useEstimate } from '@/lib/estimate/EstimateContext';
@@ -23,6 +23,7 @@ export function Sidebar() {
     { href: `/project/${projectId}/labor`, label: 'Labor', icon: HardHat },
     { href: `/project/${projectId}/pass-throughs`, label: 'Pass Throughs', icon: Receipt },
     { href: `/project/${projectId}/summary`, label: 'Executive Summary', icon: BarChart3 },
+    { href: `/project/${projectId}/admin`, label: 'Admin', icon: Settings },
   ];
 
   // Auto-collapse to reclaim width on tablet/narrow viewports. Only ever collapses
