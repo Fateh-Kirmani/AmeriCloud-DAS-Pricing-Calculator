@@ -10,9 +10,10 @@ export default defineConfig({
     // Run test FILES sequentially to avoid cross-file races against that shared state.
     fileParallelism: false,
     // Dev/test now points at a remote Neon database (no local Docker Postgres available),
-    // so per-test network round-trips are much slower than the default 5s assumes.
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    // so per-test network round-trips are much slower than the default 5s assumes. 30s still
+    // flaked intermittently on the slowest tests (e.g. two sequential createProject() clones).
+    testTimeout: 60000,
+    hookTimeout: 60000,
   },
   resolve: {
     alias: {
