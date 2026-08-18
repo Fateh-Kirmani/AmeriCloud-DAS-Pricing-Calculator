@@ -336,6 +336,53 @@ describe('EstimateProvider / useEstimate', () => {
     }
   });
 
+  it('sends a beacon with the pending draft on pagehide, before the debounce has a chance to fire', () => {
+    // Regression test for real data loss on production: a hard page unload (tab close, browser
+    // Back/Forward, typing a new URL, refresh) kills the JS runtime immediately, aborting any
+    // in-flight or not-yet-started fetch (including a Server Action call) before it completes —
+    // so a pending edit within the ~500ms debounce window was silently lost even though a
+    // beforeunload warning appeared. sendBeacon is the browser-standard way to survive this.
+    const sendBeacon = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon });
+    try {
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      fireEvent.click(screen.getByText('Set Client'));
+      expect(saveProjectDraft).not.toHaveBeenCalled(); // still within the debounce window
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(sendBeacon).toHaveBeenCalledTimes(1);
+      const [url, blob] = sendBeacon.mock.calls[0]!;
+      expect(url).toBe('/api/projects/proj-1/draft');
+      expect(blob).toBeInstanceOf(Blob);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not send a beacon on pagehide when there is nothing pending', () => {
+    const sendBeacon = vi.fn().mockReturnValue(true);
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon });
+    try {
+      render(
+        <EstimateProvider projectId="proj-1" referenceData={referenceData} estimateDefaults={estimateDefaults} initialDraft={null}>
+          <TestConsumer />
+        </EstimateProvider>,
+      );
+
+      window.dispatchEvent(new Event('pagehide'));
+
+      expect(sendBeacon).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('flushSave awaits an already in-flight (timer-driven) save instead of firing a duplicate', async () => {
     vi.useFakeTimers();
     try {

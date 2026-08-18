@@ -200,6 +200,24 @@ export function EstimateProvider({
     };
   }, []);
 
+  // A hard page unload (tab close, browser Back/Forward, typing a new URL, refresh) kills the JS
+  // runtime immediately — an in-flight or not-yet-started fetch() (including the Server Action
+  // call above) gets aborted mid-request, so a pending edit within the ~500ms debounce window is
+  // silently lost even though flushSaveRef's fetch was attempted. `pagehide` + `sendBeacon` is the
+  // browser-standard pairing for exactly this: sendBeacon's request is guaranteed to be dispatched
+  // even as the document is torn down, unlike a normal fetch. Reads pendingSaveRef directly (not
+  // currentDraft/isDirty via closure) so this effect only needs to resubscribe if projectId changes.
+  useEffect(() => {
+    function handlePageHide() {
+      const pending = pendingSaveRef.current;
+      if (!pending) return;
+      const blob = new Blob([pending.draftJson], { type: 'application/json' });
+      navigator.sendBeacon(`/api/projects/${projectId}/draft`, blob);
+    }
+    window.addEventListener('pagehide', handlePageHide);
+    return () => window.removeEventListener('pagehide', handlePageHide);
+  }, [projectId]);
+
   const input: EstimateInput = useMemo(
     () => ({ materials, contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs, markups }),
     [materials, contingencyPct, shippingHandling, loeTasks, sowTasks, technicianCount, passThroughs, markups],
