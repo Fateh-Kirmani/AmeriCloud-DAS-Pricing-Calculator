@@ -8,3 +8,4 @@ prisma/dev.db
 .vercel
 .env*
 .superpowers/
+.worktrees/
