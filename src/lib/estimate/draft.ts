@@ -47,7 +47,7 @@ const EMPTY_COVER_INFO: CoverInfo = {
 
 export function buildBlankDraft(estimateDefaults: EstimateDefaultsData): PersistedDraft {
   return {
-    coverInfo: EMPTY_COVER_INFO,
+    coverInfo: { ...EMPTY_COVER_INFO },
     materials: [],
     contingencyPct: estimateDefaults.contingencyPct,
     shippingHandling: 0,
